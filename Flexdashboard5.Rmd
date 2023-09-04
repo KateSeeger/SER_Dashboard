@@ -1,0 +1,2430 @@
+---
+title: "Flexdashboard8_25"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+    theme:  
+          version: 4
+          bootswatch: litera
+runtime: shiny
+
+---
+
+
+```{r}
+###### Most updated working version of the dashboard 
+
+
+########## UPDATES
+#index of cover
+#on cover/constancy page - put range next to cover 0.0 - 0.1 (1)
+#on cover - per habitat group - include number of total plots in the label
+# change table - from index of cover - how many plots
+    ### check with NETN and look for a citation on cover codes
+
+#constancy label = total num plots occupied
+#constancy = number of plots = % plots present/occupied (constancy)
+#within cell, occupancy 75% (n=6)
+
+
+##cwd histograms - ggridge - bin the diameters by 10s, each bar is how many observations are in each bin
+### shift by year
+#page height is determined by number of columns
+
+```
+
+
+```{r include = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+#qaqc list - put in document this dashboard does this to clean the dashboard
+#do the DBH - BA conversion - would need the event table
+#data check page, highlight records with potential problems
+#reactables filter each column
+#tbl_
+#plot_
+#df_
+
+```
+
+```{r setup, include=FALSE}
+
+rm(list=ls())
+### NOTES
+# Converted all tibbles to data frames to get rid of phantom column name errors
+
+### NAMING RULES
+# Functions: FuncTest(dat1_there, dat2_here)
+# Action buttons: button_PushMe
+# User inputs: sel_SelectMe
+# Lists, data frames, vectors, variables...: station_files_list, station_df,  station_vec, here_is_a_variable
+# Data frame cols: df$ColThisOne, df$ColThatOne
+# List elements: list$ElementOne, list$ElementTwo
+# Reactive elements: rv$ThisOne, rv$ThatOne
+# Temporary variables: temp_this_df
+# Well panel id's: wp_FilterParkSite
+
+#options(url.method = "wininet")
+#options(repos="http://cran.revolutionanalytics.com")
+#options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+### Load libraries -----
+# Will automatically install any libraries it can't find
+pkgs <- c("flexdashboard", 
+              "shiny", 
+              "knitr", 
+              "odbc", # pull data from SQL server
+              "leaflet", 
+              "here",
+              "plotly", 
+              "tidyverse", 
+              "plyr", 
+              "sf",
+              "readr",
+              "magrittr",
+              "bslib", 
+              "ggplot2",
+              "patchwork",
+              "leaflet.extras", 
+              "lubridate",
+              "forcats",
+              "httr", # use web services
+              "rgdal", # to use readOGR
+              "sp", # transform projections
+              "purrr", # for applying functions to dplyr groups
+              "dataMaid", # for data checks
+              "shinyFiles", # for user to save files in specified location
+              "RColorBrewer", # to display brewer palettes
+              "shinyjs", # for easy functions that use JavaScript
+              "stringr", # to detect text snippets
+              "reactable",
+              "reactablefmtr",
+              "base", 
+              "htmltools", 
+              "ggthemes",
+              "data.table", # for fast lag calcs
+              "DT", # for interactive tables
+              "cowplot", # to get legends from plots
+              "crosstalk", # for SharedData
+              "gridExtra", # for arranging plots and adding plot annotations (ggplotly can't do captions or subtitles)
+              "RgoogleMaps", # for MaxZoom & MinZoom
+              "leaflet.minicharts") # for pie charts in leaflet maps
+
+
+installed_pkgs <- pkgs %in% installed.packages()
+if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE) 
+lapply(pkgs, library, character.only = TRUE)
+
+invisible(lapply(pkgs, library, character.only = TRUE))
+
+options(shiny.maxRequestSize=60*1024^2) #increase the file upload limit to 90MB.
+
+rv <- reactiveValues(SeedlingSapling = NULL, SpeciesDiversity = NULL, Tree = NULL, CanopyCover = NULL, StandHeight = NULL, Genus = NULL, LatLong = NULL, Species_Cover = NULL, Cover_Class = NULL, Exotics = NULL, CWD = NULL, BroadGroup = NULL, CycleNumber = NULL)
+
+temp_rv <- shiny::reactiveValues(
+  df_rich = NULL, 
+  plotly_tree = NULL, 
+  df_treeplot = NULL, 
+  df_treeyr = NULL,
+  selected_richgroup = NULL, 
+  constancy_final = NULL, 
+  cwd_df = NULL, 
+  cwd_obs = NULL, 
+  cwd_countplot = NULL, 
+  cwd_avgplot = NULL, 
+  df_spcompbar = NULL
+)
+```
+
+```{r data}
+# reading in data -----
+# setwd("C:/Users/kseeger/OneDrive - DOI/Desktop/GIT_RSTUDIO/FLEXDASHBOARD")
+
+# Reading in CSV files
+tree_basics <- read_csv(here::here("Data_In", "TreeBasics_20221013.csv"))
+seedling_sapling <- read_csv(here::here("Data_In", "SeedlingSapling_20221013.csv"))
+cwd <- read_csv(here::here("Data_In","CWD_Basics_20221013.csv"))
+canopy_cover <- read_csv(here::here("Data_In","CanopyCover_20221021.csv"))
+broadgroup <- read_csv(here::here("Data_In", "BroadGroup.csv")) #used to be broadgroup
+species_rich <- read_csv(here::here("Data_In","SpeciesDiversity_LongFormat_20230421.csv")) #waiting on new data from Tim
+stand_height <- read_csv(here::here("Data_In", "CUPN_StandHeight.csv"))
+genus <- read_csv(here::here("Data_In", "CUPN_Genus.csv"))
+cupn_plots <- read_csv(here::here("Data_In", "CUPN_PlotEvents_LatLong.csv"))
+constancy <- read_csv(here::here("Data_In", "CUPN_SpeciesCover.csv"))
+cover_code <- read_csv(here::here("Data_In", "CoverClass.csv"))
+cupn_exotics <- read_csv(here::here("Data_In", "CUPN_HighPriorityExotics.csv"), locale=locale(encoding="latin1"))
+
+```
+
+```{r functions}
+### Functions-----
+
+#rounding function 
+#stick to a certain function naming rule
+round_df <- function(x, digits) {
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x
+}
+
+options(scipen=999)
+
+#keeping only first letter of character
+makeInitials <- function(charVec) {
+  make.unique(vapply(strsplit(toupper(charVec), " "), 
+                     function(x) paste(substr(x, 1, 1), collapse = ""), 
+                     vector("character", 1L)))
+}
+
+
+Okabe_Ito <- c("#E69F00", "#56B4E9", "#009E73", '#CC6677',"#F0E442", "#0072B2", "#D55E00", 
+               "#CC79A7", "#000000",'#DDDDDD', '#EE6678', '#99DDFF', 
+               '#BBCC33', '#332288', '#882255', '#FFAABB')
+
+okabe_ito <- c( "#0072B2", "#D55E00", 
+               "#CC79A7", "#000000",  '#CC6677', '#BBCC33', '#99DDFF', 
+                '#332288', '#882255', '#FFAABB', "#E69F00", "#56B4E9", "#009E73", "#F0E442")
+
+viridis <- c("#fde725", "#5ec962", "#21918c","#3b528b","#440154")
+
+
+makefun <- function(data) {
+  data %>% 
+  dplyr::group_by(Plot_Code, Year) %>%
+  dplyr::summarize(n())
+  
+}
+##### css functions
+integer_columns <- function(maxWidth = 60, ...) {
+  colDef(maxWidth = maxWidth, align = "center",...)
+}
+
+with_tooltip <- function(value, tooltip) {
+  tags$abbr(style = "text-decoration: underline; text-decoration-style: dotted; cursor: help", title = tooltip, value)
+}
+```
+
+```{css styles}
+.border-left {
+  border-left: 14px solid #000;
+  font-size: 12px
+}
+
+.header { 
+  border-bottom-color: #555;
+  border-top-color: #555;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.group {
+  font-size: 12px;
+}
+
+.reactable {
+font-size: 12px; 
+}
+
+.cell {
+  font-size: 12px;
+
+}
+
+.cellitalics {
+  font-style: italic;
+}
+```
+
+
+```{r}
+genus <- genus %>%
+  dplyr::select(-Space_Index)
+
+tree_basics <- tree_basics %>%
+  dplyr::mutate(Year = lubridate::year(lubridate::mdy(Start_Date))) %>%
+  dplyr::filter(Event_Type_Name != "QA/QC") %>% 
+  left_join(genus) %>%
+  dplyr::mutate(Genus = as.factor(Genus))
+
+seedling_sapling <- seedling_sapling %>%
+  dplyr::mutate(Year = lubridate::year(lubridate::mdy(Start_Date))) %>%
+  dplyr::filter(Event_Type_Name != "QA/QC") %>%
+  left_join(genus) %>%
+   dplyr::mutate(Year = as.factor(Year), 
+                 Genus = as.factor(Genus))
+
+positions <- c("Seedling", "Sapling", "Tree")
+
+broadgroup <- broadgroup %>%
+  dplyr::select(Network_Code, Park_Code, Subunit_Code, Plot_Code, Start_Date, Event_Type_Name, Association_TranslatedName, Association_CommonName, Group_CUPNName)
+
+cover_code <- cover_code %>%
+  dplyr::select(-`Cover Range (%)`)
+
+species_rich <- species_rich %>%
+  dplyr::filter(Event_Type != "QA/QC") %>% #should be event_type_name
+  tidyr::replace_na(list(Nativity = "Unknown")) %>%
+  dplyr::mutate(Start_Date = lubridate::mdy(Start_Date)) 
+
+#--------------
+cwd <- cwd %>%
+  dplyr::filter(Event_Type_Name != "QA/QC")
+
+constancy_full <-  Reduce(function (...) { merge(..., all = TRUE) },  
+                           list(constancy, cover_code, broadgroup, genus))
+constancy_full %<>% 
+  dplyr::filter(Event_Type != "QAQC" | Event_Type != "training")
+```
+
+```{r plot rich}
+#reduce code!!!!
+
+#Summarizing nativity of species per plot
+#Using Species_Diversity_ID not Plant Code because doesn't account for sp level differences at plot level 
+#Species_Diversity_ID is used differently for each plot, so not a useful metric for species diversity across lager scales (i.e. parks, subunits, etc,)
+
+plot_nativity <- species_rich %>%
+  dplyr::filter(Sample_Depth_Code != 0) %>%
+  dplyr::mutate(Sample_Depth_Code = as.factor(Sample_Depth_Code)
+         ) %>%
+  dplyr::group_by(Park_Code, Subunit_Code, Plot_Code, Start_Date, Species_Diversity_ID,
+           Nativity) %>%
+  dplyr::count(Nativity)
+
+plot_nativity <- plot_nativity %>%
+  dplyr::group_by(Park_Code, Subunit_Code, Plot_Code, Start_Date) %>%
+  dplyr::count(Nativity)
+
+plot_nativity <- plot_nativity %>%
+  tidyr::pivot_wider(
+    names_from = Nativity, 
+    values_from = n
+  )
+
+plot_nativity <- plot_nativity %>%
+  dplyr::rename_at(vars(-Park_Code, -Subunit_Code, -Plot_Code, -Start_Date),function(x) paste0(x,"<sup>a</sup>"))
+
+###400 m2 
+plot_total <- species_rich %>%
+  dplyr::filter(Sample_Depth_Code != 0) %>%
+  dplyr::mutate(Sample_Depth_Code = as.factor(Sample_Depth_Code), 
+                Growth_Form = toupper(Growth_Form)) %>%
+  dplyr::group_by(Park_Code, Subunit_Code, Plot_Code, Start_Date, Species_Diversity_ID, Growth_Form)%>%
+  dplyr::count(Growth_Form)
+
+plot_total <- plot_total %>%
+  dplyr::group_by(Park_Code, Subunit_Code, Plot_Code, Start_Date, Growth_Form) %>%
+  dplyr::summarize(Count = n())
+
+###100m2
+plot_mod100 <- species_rich %>%
+  dplyr::filter(Sample_Depth_Code != 0) %>%
+  dplyr::mutate(Sample_Depth_Code = as.factor(Sample_Depth_Code), 
+         Growth_Form = toupper(Growth_Form)) %>%
+  dplyr::group_by(Park_Code,
+                  Subunit_Code, 
+                  Plot_Code, 
+                  Start_Date,
+           Growth_Form,
+           Module, 
+           Species_Diversity_ID) %>%
+  dplyr::count(Species_Diversity_ID)%>%
+  ungroup() %>%
+  dplyr::group_by(Park_Code,
+                  Subunit_Code, 
+                  Plot_Code, 
+                  Start_Date,
+                  Growth_Form,
+                  Module, 
+                  Species_Diversity_ID) %>%
+  dplyr::count(Module) %>%
+  ungroup()%>%
+  dplyr::group_by(Park_Code,
+                  Subunit_Code, 
+                  Plot_Code,
+                  Start_Date,
+                  Growth_Form,
+                  Module) %>%
+  dplyr::summarize(numSpecies = sum(n))%>%
+  ungroup() %>%
+  dplyr::group_by(Park_Code, 
+                  Subunit_Code, 
+                  Plot_Code,
+                  Start_Date,
+                  Growth_Form) %>%
+  dplyr::summarize(Mod100 = sum(numSpecies)/4) 
+
+### 10m2
+plot_mod10 <- species_rich %>%
+  dplyr::filter(Sample_Depth_Code != 0, 
+         Sample_Depth_Code != 1) %>%
+  dplyr::mutate(Sample_Depth_Code = as.factor(Sample_Depth_Code), 
+         Growth_Form = toupper(Growth_Form)) %>%
+  dplyr::group_by(Park_Code,
+                  Subunit_Code, 
+                  Plot_Code, 
+                  Start_Date,
+           Growth_Form,
+           Module,
+           Corner,
+           Species_Diversity_ID) %>%
+  dplyr::count(Species_Diversity_ID)%>%
+  ungroup() %>%
+  dplyr::group_by(Park_Code,
+                  Subunit_Code, 
+                  Plot_Code, 
+                  Start_Date,
+           Growth_Form,
+           Module,
+           Corner,
+           Species_Diversity_ID) %>%
+  dplyr::count(Corner) %>%
+  ungroup()%>%
+  dplyr::group_by(Park_Code,
+                  Subunit_Code, 
+                  Plot_Code,
+                  Start_Date,
+           Growth_Form,
+           Module,
+           Corner) %>%
+  dplyr::summarize(numSpecies = sum(n)) %>%
+  ungroup() %>%
+  dplyr::group_by(Park_Code,
+                  Subunit_Code, 
+                  Plot_Code,
+                  Start_Date,
+                  Growth_Form) %>%
+  dplyr::summarize(Mod10 = sum(numSpecies)/8)
+
+###1m2
+plot_mod1 <- species_rich %>%
+  dplyr::filter(Sample_Depth_Code == 3) %>%
+  dplyr::mutate(Sample_Depth_Code = as.factor(Sample_Depth_Code), 
+         Growth_Form = toupper(Growth_Form)) %>%
+  dplyr::group_by(Park_Code,
+                  Subunit_Code, 
+                  Plot_Code, 
+                  Start_Date,
+           Growth_Form, 
+           Module,
+           Corner,
+           Species_Diversity_ID) %>%
+  dplyr::count(Species_Diversity_ID)%>%
+  ungroup()%>%
+  dplyr::group_by(Park_Code,
+                  Subunit_Code, 
+                  Plot_Code, 
+                  Start_Date,
+           Growth_Form, 
+           Module, 
+           Corner,
+           Species_Diversity_ID) %>%
+  dplyr::count(Corner)%>%
+  ungroup()%>%
+  dplyr::group_by(Park_Code,
+                  Subunit_Code, 
+                  Plot_Code,
+                  Start_Date,
+           Growth_Form,
+           Module, 
+           Corner) %>%
+  dplyr::summarize(numSpecies = sum(n))%>%
+  ungroup()%>%
+  dplyr::group_by(Park_Code,
+                  Subunit_Code, 
+                  Plot_Code,
+                  Start_Date,
+                  Growth_Form) %>%
+  # dplyr::summarize(Mod1 = mean(numSpecies))
+  dplyr::summarize(Mod1 = sum(numSpecies)/8)
+
+### full join
+plot_rich <- Reduce(function (...) { merge(..., all = TRUE) },  
+                           list(plot_total, plot_mod100, plot_mod10, plot_mod1))
+
+plot_rich <- plot_rich %>%
+    mutate(Growth_Form = mapply(function(charVec) makeInitials(charVec), Growth_Form)) #BHT = `GROUP`
+
+plot_rich <- plot_rich %>%
+  tidyr::pivot_wider(
+    names_from = Growth_Form, 
+    values_from = c(Count,
+                    Mod100,
+                    Mod10, 
+                    Mod1), 
+    names_prefix = "")
+
+plot_rich <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
+                           list(plot_nativity, plot_rich))
+
+plot_rich <- plot_rich %>%
+  mutate(Start_Date = as.character(Start_Date))
+
+plot_rich <- round_df(plot_rich, 1)
+
+plot_rich <- plot_rich %>%
+    replace(is.na(.), 0)
+
+plot_rich <- plot_rich %>%
+  dplyr::rename_at(vars(starts_with("Count_")), 
+            list(~paste(.,"<sup>a</sup>"))) %>%
+  dplyr::rename_at(vars(starts_with("Mod100_")), 
+            list(~paste(.,"<sup>b</sup>"))) %>%
+  dplyr::rename_at(vars(starts_with("Mod10_")), 
+            list(~paste(., "<sup>c</sup>"))) %>%
+  dplyr::rename_at(vars(starts_with("Mod1_")), 
+            list(~paste(., "<sup>d</sup>")))
+
+names(plot_rich) = gsub(pattern = "Count_", replacement = "", x = names(plot_rich))
+names(plot_rich) = gsub(pattern = "Mod100_", replacement = "", x = names(plot_rich))
+names(plot_rich) = gsub(pattern = "Mod10_", replacement = "", x = names(plot_rich))
+names(plot_rich) = gsub(pattern = "Mod1_", replacement = "", x = names(plot_rich))
+
+# write.csv(plot_rich, "flexdash2rich.csv")
+```
+
+```{r observe rich CONDENSED}
+# renderUI({
+#   shiny::req(!is.null(input$rich_group), !is.null(species_rich))
+#   
+#use all_of in select(input$code) 
+# 
+# input <- list()
+# input$rich_year <- "2011"
+# input$rich_group <- "Subunit_Code"
+
+observeEvent(eventExpr = input$button_UpdateRichTable, {
+  shiny::req(!is.null(input$rich_group), !is.null(species_rich), !is.null(plot_rich), !is.null(input$rich_year))
+  withProgress(message = "Just a moment", detail = "calculating summaries...", value = 0, {
+    cat("line76")
+
+
+if (input$rich_year == "All") {
+    rv$df_plotrich <- plot_rich 
+} else {
+  rv$df_plotrich <- plot_rich %>%
+    dplyr::filter(lubridate::year(Start_Date) %in% input$rich_year)
+}
+  
+# saveRDS(isolate(reactiveValuesToList(input)), paste0("plotrich_input.RDS"))
+# saveRDS(isolate(reactiveValuesToList(rv)), paste0("plotrich_rv.RDS"))
+
+park_nativity <- 
+  if (input$rich_year == "All") {
+    species_rich 
+} else {
+  species_rich %>%
+    dplyr::filter(lubridate::year(Start_Date) %in% input$rich_year)
+}
+
+park_nativity <- park_nativity %>%
+  dplyr::filter(Sample_Depth_Code != 0) %>%
+ # dplyr::filter(lubridate::year(Start_Date) %in% input$rich_year) %>%
+  dplyr::mutate(Sample_Depth_Code = as.factor(Sample_Depth_Code)
+         ) %>%
+  dplyr::select(all_of(input$rich_group), Plot_Code, Network_Scientific_Name,
+           Nativity) %>%
+  dplyr::distinct()
+
+park_nativity <- park_nativity %>%
+  dplyr::group_by(!!as.name(input$rich_group), Plot_Code) %>%
+  dplyr::count(Nativity)
+
+park_nativity <- park_nativity %>%
+  dplyr::group_by(!!as.name(input$rich_group), Nativity) %>%
+  dplyr::summarize(n = mean(n))
+  
+park_nativity <- park_nativity %>%
+  tidyr::pivot_wider(
+    names_from = Nativity, 
+    values_from = n
+  )
+
+park_nativity <- park_nativity %>%
+  dplyr::rename_at(vars(-input$rich_group),function(x) paste0(x,"<sup>a</sup>"))
+
+###400 m2 
+park_total <-
+  if (input$rich_year == "All") {
+    species_rich
+} else {
+  species_rich %>%
+    dplyr::filter(lubridate::year(Start_Date) %in% input$rich_year)
+}
+
+park_total <- park_total %>%
+  dplyr::filter(Sample_Depth_Code != 0) %>%
+ # dplyr::filter(lubridate::year(Start_Date) %in% input$rich_year) %>%
+  dplyr::mutate(Sample_Depth_Code = as.factor(Sample_Depth_Code), 
+                Growth_Form = toupper(Growth_Form)) %>%
+  dplyr::group_by(!!as.name(input$rich_group), Plot_Code, Network_Scientific_Name, Growth_Form)%>%
+  dplyr::count(Growth_Form)
+
+park_total <- park_total %>%
+  dplyr::group_by(!!as.name(input$rich_group), Plot_Code, Growth_Form) %>%
+  dplyr::summarize(Count = n())
+
+park_total <- park_total %>%
+  dplyr::group_by(!!as.name(input$rich_group), Growth_Form) %>%
+  dplyr::summarize(Count = mean(Count))
+
+
+###100m2
+park_mod100 <- 
+  if (input$rich_year == "All") {
+    species_rich
+} else {
+  species_rich %>%
+    dplyr::filter(lubridate::year(Start_Date) %in% input$rich_year)
+}
+
+park_mod100 <- park_mod100 %>%
+  dplyr::filter(Sample_Depth_Code != 0) %>%
+  dplyr::mutate(Sample_Depth_Code = as.factor(Sample_Depth_Code), 
+         Growth_Form = toupper(Growth_Form)) %>%
+  dplyr::group_by(!!as.name(input$rich_group),
+                  Plot_Code,
+           Growth_Form,
+           Module, 
+           Network_Scientific_Name) %>%
+  dplyr::count(Network_Scientific_Name)%>%
+  ungroup() %>%
+  dplyr::group_by(!!as.name(input$rich_group), 
+                  Plot_Code,
+                  Growth_Form,
+                  Module, 
+                  Network_Scientific_Name) %>%
+  dplyr::count(Module) %>%
+  ungroup()%>%
+  dplyr::group_by(!!as.name(input$rich_group), 
+                  Plot_Code,
+                  Growth_Form,
+                  Module) %>%
+  dplyr::summarize(numSpecies = sum(n))%>%
+  ungroup() %>%
+  dplyr::group_by(!!as.name(input$rich_group),
+                  Plot_Code,
+                  Growth_Form) %>%
+  dplyr::summarize(Mod100 = sum(numSpecies)/4) %>%
+  ungroup() %>%
+  dplyr::group_by(!!as.name(input$rich_group), Growth_Form) %>%
+  dplyr::summarize(Mod100 = mean(Mod100))
+
+
+### 10m2
+park_mod10 <- 
+    if (input$rich_year == "All") {
+    species_rich
+} else {
+  species_rich %>%
+    dplyr::filter(lubridate::year(Start_Date) %in% input$rich_year)
+}
+
+park_mod10 <- park_mod10 %>%
+  dplyr::filter(Sample_Depth_Code != 0, 
+         Sample_Depth_Code != 1) %>%
+  dplyr::mutate(Sample_Depth_Code = as.factor(Sample_Depth_Code),
+         Growth_Form = toupper(Growth_Form)) %>%
+  dplyr::group_by(!!as.name(input$rich_group), 
+                  Plot_Code, 
+           Growth_Form,
+           Module,
+           Corner,
+           Network_Scientific_Name) %>%
+  dplyr::count(Network_Scientific_Name)%>%
+  ungroup() %>%
+  dplyr::group_by(!!as.name(input$rich_group), 
+                  Plot_Code,
+           Growth_Form,
+           Module,
+           Corner,
+           Network_Scientific_Name) %>%
+  dplyr::count(Corner) %>%
+  ungroup()%>%
+  dplyr::group_by(!!as.name(input$rich_group), 
+                  Plot_Code,
+           Growth_Form,
+           Module,
+           Corner) %>%
+  dplyr::summarize(numSpecies = sum(n)) %>%
+  ungroup() %>%
+  dplyr::group_by(!!as.name(input$rich_group), Plot_Code,
+                  Growth_Form) %>%
+  #dplyr::summarize(Mod10 = mean(numSpecies))
+  dplyr::summarize(Mod10 = sum(numSpecies)/8) %>%
+  ungroup() %>%
+  dplyr::group_by(!!as.name(input$rich_group), 
+                  Growth_Form) %>%
+  dplyr::summarize(Mod10 = mean(Mod10))
+
+# input <- list() 
+# input$rich_group <- "Subunit_Code"
+###1m2
+park_mod1 <- 
+  if (input$rich_year == "All") {
+    species_rich
+} else {
+  species_rich %>%
+    dplyr::filter(lubridate::year(Start_Date) %in% input$rich_year)
+}
+park_mod1 <- park_mod1 %>%
+  dplyr::filter(Sample_Depth_Code == 3) %>%
+ # dplyr::filter(lubridate::year(Start_Date) %in% input$rich_year) %>%
+  dplyr::mutate(Sample_Depth_Code = as.factor(Sample_Depth_Code), 
+         Growth_Form = toupper(Growth_Form)) %>%
+  dplyr::group_by(!!as.name(input$rich_group), 
+                  Plot_Code,
+           Growth_Form, 
+           Module,
+           Corner,
+           Network_Scientific_Name) %>%
+  dplyr::count(Network_Scientific_Name)%>%
+  ungroup()%>%
+  dplyr::group_by(!!as.name(input$rich_group),
+                  Plot_Code,
+           Growth_Form, 
+           Module, 
+           Corner,
+           Network_Scientific_Name) %>%
+  dplyr::count(Corner)%>%
+  ungroup()%>%
+  dplyr::group_by(!!as.name(input$rich_group),
+                  Plot_Code,
+           Growth_Form,
+           Module, 
+           Corner) %>%
+  dplyr::summarize(numSpecies = sum(n))%>%
+  ungroup()%>%
+  dplyr::group_by(!!as.name(input$rich_group),
+                  Plot_Code,
+                  Growth_Form) %>%
+  dplyr::summarize(Mod1 = sum(numSpecies)/8)%>%
+  ungroup() %>%
+  dplyr::group_by(!!as.name(input$rich_group),
+                  Growth_Form) %>%
+  dplyr::summarize(Mod1 = mean(Mod1))
+
+  
+### full join
+park_rich <- Reduce(function (...) { merge(..., all = TRUE) },  
+                           list(park_total, park_mod100, park_mod10, park_mod1))
+
+park_rich <- park_rich %>%
+    mutate(Growth_Form = mapply(function(charVec) makeInitials(charVec), Growth_Form)) #BHT = `GROUP`
+
+park_rich <- park_rich %>%
+  tidyr::pivot_wider(
+    names_from = Growth_Form, 
+    values_from = c(Count,
+                    Mod100,
+                    Mod10, 
+                    Mod1), 
+    names_prefix = "")
+
+park_rich <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
+                           list(park_nativity, park_rich))
+
+park_rich <- round_df(park_rich, 2)
+
+park_rich <- park_rich %>%
+    replace(is.na(.), 0)
+
+park_rich <- park_rich %>%
+  dplyr::rename_at(vars(starts_with("Count_")), 
+            list(~paste(.,"<sup>a</sup>"))) %>%
+  dplyr::rename_at(vars(starts_with("Mod100_")), 
+            list(~paste(.,"<sup>b</sup>"))) %>%
+  dplyr::rename_at(vars(starts_with("Mod10_")), 
+            list(~paste(., "<sup>c</sup>"))) %>%
+  dplyr::rename_at(vars(starts_with("Mod1_")), 
+            list(~paste(., "<sup>d</sup>")))
+
+names(park_rich) = gsub(pattern = "Count_", replacement = "", x = names(park_rich))
+names(park_rich) = gsub(pattern = "Mod100_", replacement = "", x = names(park_rich))
+names(park_rich) = gsub(pattern = "Mod10_", replacement = "", x = names(park_rich))
+names(park_rich) = gsub(pattern = "Mod1_", replacement = "", x = names(park_rich))
+
+
+rv$df_rich <- park_rich
+
+# write.csv(park_rich, "flexdash2parkrich.csv")
+
+# saveRDS(isolate(reactiveValuesToList(input)), paste0("rich_input.RDS"))
+# saveRDS(isolate(reactiveValuesToList(rv)), paste0("rich_rv.RDS"))
+  
+rv$selected_richgroup <- input$rich_group
+#rv$selected_richyear <- input$rich_year
+
+})
+})
+```
+
+```{r prop tree basics}
+#Tree_Basics 
+tree_basics_barplot <- tree_basics %>%
+  dplyr::filter(Status_Code == 1) %>%
+  dplyr::group_by(Plot_Code,
+           Plant_Code, Genus,
+           Event_Type_Name,
+           Start_Date) %>%
+  dplyr::summarize(Tree = n())
+```
+
+```{r prop seedsap basics}
+
+#Seedling Sapling Count 
+sapling_barplot <- seedling_sapling %>%
+  dplyr::select(Plot_Code, 
+         Plant_Code, Genus, 
+         Start_Date, 
+         Event_Type_Name, 
+         Sapling_0_1_DBH,
+         Sapling_1_2half_DBH, 
+         Sapling_2half_5_DBH,
+         Sapling_5_10_DBH) %>%
+  replace(is.na(.), 0) %>%
+  dplyr::mutate(SapCount = rowSums(across(where(is.numeric))))
+    
+sapling_barplot <- sapling_barplot %>%
+  dplyr::group_by(Plot_Code, 
+           Start_Date, 
+           Event_Type_Name,
+           Plant_Code, Genus) %>%
+  dplyr::summarize(Sapling = sum(SapCount))
+      
+#Seedling Count
+seedling_barplot <- seedling_sapling %>%
+  dplyr::select(Plot_Code,
+         Plant_Code, Genus,
+         Start_Date,
+         Event_Type_Name,
+         Seedling_15_30_Tall,
+         Seedling_5_15_Tall, 
+         Seedling_30_50_Tall,
+         Seedling_50_137_Tall) %>%
+  replace(is.na(.), 0) %>%
+  dplyr::mutate(SeedCount = rowSums(across(where(is.numeric))))
+    
+seedling_barplot <- seedling_barplot %>%
+  dplyr::group_by(Plot_Code, Start_Date, Event_Type_Name, Plant_Code, Genus) %>%
+  dplyr::summarize(Seedling = sum(SeedCount))
+ 
+#Creating table with sum counts woody strata 
+
+tree_full <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
+                           list(seedling_barplot,
+                                sapling_barplot,
+                                tree_basics_barplot))
+
+```
+
+```{r prop tree basics 2}
+tree_full <- left_join(broadgroup, tree_full, by = c("Plot_Code", "Start_Date", "Event_Type_Name"))
+
+tree_full <- tree_full %>%
+  dplyr::mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
+  dplyr::mutate(Genus = as.factor(Genus))
+```
+
+```{r prop tree basics 3}
+tree_full <- tree_full %>%
+  pivot_longer(cols = c(Seedling, Sapling, Tree), 
+               names_to = "Strata", 
+               values_to = "Count")
+tree_full <- tree_full %>%
+  dplyr::mutate(Start_Date = as.Date(Start_Date, format = "%m/%d/%Y")) %>%
+  dplyr::mutate(Genus = as.factor(Genus))
+
+```
+
+```{r prop tree basics 4}
+renderUI({
+  shiny::req(!is.null(tree_full), !is.null(input$prop_year))
+  
+ 
+    if (input$prop_year == "All") {
+        rv$df_treeyr <- tree_full
+      } else {
+        rv$df_treeyr <- tree_full %>%
+          dplyr::filter(lubridate::year(Start_Date) %in% input$prop_year)
+      }
+saveRDS(isolate(reactiveValuesToList(input)), paste0("propyr_input.RDS"))
+ saveRDS(isolate(reactiveValuesToList(rv)), paste0("propyr_rv.RDS"))
+
+})
+
+observeEvent(eventExpr = input$button_UpdatePlots, {
+  shiny::req(!is.null(input$Spatial_Scale), !is.null(input$Individual_Unit), !is.null(input$Association), !is.null(rv$df_treeyr)) # !is.null(tree_full), !is.null(input$prop_year)) #!is.null(rv$df_treeyr)
+
+# input <- list()
+#  input$prop_year <- "2011"
+# input$Spatial_Scale <- "Subunit_Code"
+# input$Individual_Unit <- "BIRT"
+# input$Association <- c("Liriodendron tulipifera / (Cercis canadensis) / (Lindera benzoin) Forest", "Juglans nigra / Verbesina alternifolia Forest", "Acer saccharum - Carya ovata - Juglans nigra / Symphoricarpos orbiculatus / Galium circaezans Forest")
+
+df_tree <- rv$df_treeyr %>%
+  dplyr::filter(!!as.name(input$Spatial_Scale) == input$Individual_Unit) %>%
+    dplyr::filter(Association_CommonName %in% input$Association) %>%
+    dplyr::group_by(Association_CommonName, Strata, Genus) %>%
+    dplyr::summarize(Sum = sum(Count)) %>%
+    top_n(8, Sum) %>%
+    droplevels()
+
+color_pallete_function <- colorRampPalette(
+  colors = Okabe_Ito,
+  space = "Lab")
+
+num_colors <- nlevels(df_tree$Genus)
+okabepalette <- color_pallete_function(num_colors)
+okabepalette <- setNames(okabepalette, levels(df_tree$Genus))
+
+
+page_height = length(unique(df_tree$Association_CommonName)) * 500 + 150
+
+plot_tree <- df_tree %>%
+  ggplot(aes(x = Strata,
+             y = Sum,
+             fill = Genus)) +
+  geom_bar(width = 0.45, 
+           position = "fill",
+           stat = "identity") +
+  theme_clean() +
+  labs(x = "", y = "") +
+  # geom_text(aes(label = Genus), position = position_fill(vjust = 0.5), color = "#FFFFFF") + # HAS ISSUES
+  scale_fill_manual(values = okabepalette[unique(df_tree$Genus)],
+                      drop = TRUE) +
+  scale_x_discrete(limits = positions) +
+  facet_wrap(~ Association_CommonName , ncol = 1)
+
+
+x <- length(unique(df_tree$Association_CommonName))
+
+
+  rv$plotly_tree <-
+if (x == 1 ) {
+       ggplotly(plot_tree, height = page_height) %>%
+  layout(margin = list(
+    l = 50,
+  r = 50,
+  b = 100,
+  t = 100,
+  pad = 40),
+  legend = list(orientation = 'h',
+                xanchor = "center",
+                borderwidth = 0.5,
+                x = 0.5,
+                y = -0.3,
+                title = list(font = list(size = 12)),
+                font = list(size = 11)))
+    }
+
+   else {
+       ggplotly(plot_tree, height = page_height) %>%
+  layout(margin = list(
+    l = 50,
+  r = 50,
+  b = 100,
+  t = 100,
+  pad = 40),
+  legend = list(title = list(font = list(size = 12)),
+                font = list(size = 11)))
+  }
+
+
+})
+
+```
+
+```{r seedsap plot 1}
+### needs updated edits!!!
+
+modnum <- seedling_sapling %>%
+  group_by(Plot_Code, Start_Date, Module) %>%
+  distinct(Module)%>%
+  dplyr::group_by(Plot_Code, Start_Date) %>%
+  dplyr::summarise(ModuleNumber = n()) %>%
+  ungroup() 
+
+cornernum <- seedling_sapling %>%
+  group_by(Plot_Code, Start_Date, Module, Corner) %>%
+  distinct(Corner) %>%
+  dplyr::group_by(Plot_Code, Start_Date) %>%
+  dplyr::summarise(CornerNumber = n()) %>%
+  ungroup() 
+
+#Calculating DBH using arithmetic average
+seedsap_plot <- seedling_sapling %>% #used to be seedlingsaplingx
+  dplyr::mutate(
+    Corner = as.factor(Corner), 
+    Module = as.factor(Module)) %>%
+  dplyr::group_by(Network_Code, 
+                  State_Code, 
+                  Park_Code,
+                  Subunit_Code, 
+                  Plot_Code, 
+                  Start_Date) %>%
+  dplyr::summarise(across(where(is.numeric), sum, na.rm = TRUE), .groups = "drop")
+
+#Calculating Sapling BA (m2/ha) by calculating with binned arithmetic average
+seedsap_plot <- seedsap_plot %>%
+  dplyr::mutate(Sapling01_BA = (0.00007854 * ((Sapling_0_1_DBH*0.5) ^2)),
+    Sapling12h_BA = (0.00007854* ((Sapling_1_2half_DBH*1.75) ^2)),
+    Sapling2h5_BA = (0.00007854 * ((Sapling_2half_5_DBH*3.25) ^2)),
+    Sapling510_BA = (0.00007854* ((Sapling_5_10_DBH*7.5)^2)))
+
+```
+
+```{r seedsap plot2}
+#Finding sums of Sapling/Seedlings/BA
+
+seedsap_plot <- Reduce(function (...) { merge(..., all = TRUE) },  #full join idk why I can't just do a regular left join....
+                        list(seedsap_plot, modnum, cornernum))
+
+
+seedsap_plot <- seedsap_plot  %>%
+  dplyr::group_by(Plot_Code, Start_Date) %>%
+  dplyr::mutate(Seedling_Density = sum(Seedling_5_15_Tall,
+                                       Seedling_15_30_Tall, 
+                                       Seedling_30_50_Tall,
+                                       Seedling_50_137_Tall)/(CornerNumber*0.0001),
+         Sapling_BA = sum(Sapling01_BA, 
+                              Sapling12h_BA, 
+                              Sapling2h5_BA,
+                              Sapling510_BA)/(ModuleNumber*0.001), #m2/ha
+         Sapling_Density = sum(Sapling_0_1_DBH,
+                               Sapling_1_2half_DBH,
+                               Sapling_2half_5_DBH,
+                               Sapling_5_10_DBH)/(ModuleNumber*0.001)) #m2/ha
+
+# seedsap_plot <- seedsap_plot %>%
+
+#   group_by(Plot_Code, Start_Date) %>%
+#   dplyr::mutate(Seedling_Density = sum(Seedling_15_30_Tall,
+#                                 Seedling_30_50_Tall,
+#                                 Seedling_50_137_Tall),
+                
+                
+                #count/8m2 -> density/ha  N m^2 / ha
+
+#library(lubridate)
+df_seedsapplot <- seedsap_plot %>%
+  dplyr::mutate(Start_Date = lubridate::mdy(Start_Date)) %>%
+  dplyr::select(Network_Code, 
+                State_Code,
+                Park_Code, 
+                Subunit_Code,
+                Plot_Code,
+                Start_Date,
+                Sapling_BA,
+                Sapling_Density,
+                Seedling_Density)
+
+#Stand height
+df_stndhtplot <- stand_height %>%
+  dplyr::filter(Event_Type != "QA/QC") %>%
+  dplyr::mutate(Start_Date = lubridate::dmy(Start_Date)) %>%
+  dplyr::select(Plot_Code, Start_Date, Stand_Height)
+  
+
+# ------------------------------------------------------------------------------------------------------------
+tree_badenplot <- tree_basics %>%
+  dplyr::filter(DBH != "NULL", 
+                Status_Code == 1) %>%
+  dplyr::mutate(DBH = as.numeric(DBH), 
+                Start_Date = lubridate::mdy(Start_Date), 
+                Tree_BA = 0.00007854 * (DBH^2))  #per tree 
+  
+df_treedeadha <- tree_basics %>%
+  dplyr::mutate(DBH = as.numeric(DBH)) %>%
+  dplyr::mutate(Start_Date = lubridate::mdy(Start_Date)) %>%
+  dplyr::filter(Event_Type_Name != "QA/QC",
+                Status_Code != 1, 
+                DBH != "NULL") %>%
+  dplyr::group_by( 
+                State_Code,
+                Park_Code, 
+                Subunit_Code,
+                Plot_Code, 
+                Start_Date) %>%
+  dplyr::summarize(Tree_Countdead = n()/0.04) %>%
+  ungroup()
+
+#count number of observations of trees for tree density
+
+df_trdbhplot <- tree_badenplot %>%
+  dplyr::group_by( 
+                State_Code,
+                Park_Code, 
+                Subunit_Code,
+                Plot_Code, 
+                Start_Date) %>%
+  dplyr::summarize(Tree_Countha = n()/0.04) %>%
+  ungroup()
+
+df_treebaplot <- tree_badenplot %>%
+  dplyr::group_by(Network_Code, 
+                State_Code,
+                Park_Code, 
+                Subunit_Code,
+                Plot_Code,
+                Start_Date) %>%
+  dplyr::summarise(Tree_BAha = sum(Tree_BA/0.04, na.rm = T)) #this excludes any of the dead trees that might have basal area calculated 
+  
+df_treefullplot <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
+                           list(df_treebaplot, df_trdbhplot, df_treedeadha, df_stndhtplot))
+
+
+#% Canopy Cover
+df_cancovplot <- canopy_cover %>%
+  dplyr::mutate(Start_Date = mdy(Start_Date)) %>%
+  dplyr::filter(Event_Type_Name != "QA/QC") %>%
+  dplyr::group_by(Network_Code, 
+                State_Code,
+                Park_Code, 
+                Subunit_Code, 
+                Plot_Code, 
+                Start_Date) %>%
+  dplyr::summarize(Canopy_Cover_Percent = mean(Canopy_Cover_Percent))
+```
+
+```{r seedsap plot3}
+df_treeplot <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
+                           list(df_treefullplot, df_seedsapplot, df_cancovplot))
+
+df_treeplot <- df_treeplot %>%
+  mutate(Start_Date = as.character(Start_Date))
+
+df_treeplot <- round_df(df_treeplot, 1)
+
+df_treeplot$Year <- year(ymd(df_treeplot$Start_Date))
+
+df_treeplot <- df_treeplot %>%
+  dplyr::mutate(Year = as.character(Year))%>%
+  dplyr::select(-State_Code)
+
+#HTML compatible code - test with df_treeplott
+df_treeplot <- df_treeplot %>%
+  dplyr::rename(Plot = Plot_Code,
+                `Survey Date` = Start_Date,
+    `Network Code` = Network_Code, 
+    `Park Code` = Park_Code, 
+    `Subunit Code` = Subunit_Code,
+    `Live Tree Basal Area <br> (m<sup>2</sup>/ha)` = Tree_BAha,
+    `Live Tree Density <br> (count/ha) ` = Tree_Countha,
+    `Dead Tree Density <br> (count/ha)` = Tree_Countdead,
+    `Seedling Density <br> (count/ha)` = Seedling_Density,
+    `Sapling Basal Area <br> (m<sup>2</sup>/ha)` = Sapling_BA,
+    `Sapling Density <br> (count/ha)` = Sapling_Density,
+    `Mean Canopy Cover <br> (%)` = Canopy_Cover_Percent,
+    `Mean Stand Height <br> (m)` = Stand_Height)
+
+#make certain selected columns to keep in the dashboard - figure out how to do network specific stuff
+```
+
+```{r seedsap plot4}
+observeEvent(eventExpr = input$button_UpdateTable, {
+  
+  
+  shiny::req(!is.null(input$year), !is.null(df_treeplot), !is.null(input$group_var))
+  
+# input <- list()
+# input$year <- "All"
+#   
+ 
+if (input$year == "All") {
+   df_filter <-  df_treeplot
+    
+  }
+  else {
+     df_filter <- df_treeplot %>%
+  filter(Year == input$year)
+  }
+
+rv$df_treeplot <- reactable::reactable(df_filter,
+                     highlight = TRUE,
+                     bordered = TRUE,
+                     pagination = FALSE,
+                     compact = TRUE,
+                     resizable = TRUE,
+                     showPageSizeOptions = TRUE,
+                     filterable = TRUE,
+                     defaultColDef = colDef(aggregate = "mean", 
+                                            format = colFormat(digits = 1),
+                                            html = TRUE, 
+                                            vAlign = "center",
+                                            headerVAlign = "bottom",
+                                            align = "left",
+                                            class = "group",
+                                            headerClass = "header"),
+                     groupBy = input$group_var, #this could be some sort of input!!! input$group paste0() maybe - y
+                     columns = list(
+                       `Plot` = colDef(html = TRUE,
+                         aggregate = "count",
+                         format = list(aggregated = colFormat(suffix = " Plots"))),
+                       `Network Code`  = colDef(aggregate = "unique", maxWidth = 70),
+                       `Park Code` = colDef(aggregate = "frequency", maxWidth =70),
+                       `Subunit Code` = colDef(aggregate = "frequency"),
+                       `Live Tree Density <br> (count/ha) ` = colDef(html = TRUE),
+                       `Dead Tree Density <br> (count/ha)` = colDef(html = TRUE),
+                       `Seedling Density <br> (count/ha)`= colDef(html = TRUE),
+                       `Sapling Basal Area <br> (m<sup>2</sup>/ha)`= colDef(html = TRUE),
+                       `Sapling Density <br> (count/ha)`= colDef(html = TRUE),
+                       `Mean Canopy Cover <br> (%)` = colDef(html = TRUE)
+                       # ,
+                       #  Year = colDef(name = "Survey Year", 
+                       #                aggregate = "unique")
+                     ))
+
+
+saveRDS(isolate(reactiveValuesToList(input)), paste0("treeplot_input.RDS"))
+saveRDS(isolate(reactiveValuesToList(rv)), paste0("treeplot_rv.RDS"))
+
+})
+```
+
+```{r}
+
+observeEvent(eventExpr = input$button_UpdateCWD, {
+  shiny::req(!is.null(input$cwd_park), !is.null(cwd), !is.null(input$cwd_yr))
+#page height is determined by number of columns
+ 
+  if (input$cwd_yr == "All") {
+  cwd_df <- cwd
+  
+  } else {
+  cwd_df <- cwd %>%
+      dplyr::filter(lubridate::year(lubridate::mdy(Start_Date)) %in% input$cwd_yr)
+    }  
+    
+  
+cwd_count <- cwd_df %>%
+  dplyr::filter(Park_Code == input$cwd_park) %>%
+  dplyr::group_by(Subunit_Code,
+                  Plot_Code, 
+                  Event_Type_Name, 
+                  Start_Date, 
+                  Transect) %>%
+  dplyr::summarize(Obs = n()) %>%
+  ungroup() 
+
+cwd_countplot <- cwd_count %>%
+  ggplot(aes(y = Obs, 
+             x = Event_Type_Name, 
+             fill = Event_Type_Name)) +
+  geom_boxplot() +
+  # theme_hc() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  facet_wrap(.~Plot_Code, nrow = ceiling(length(unique(cwd_count$Plot_Code))/5))  #was 10
+
+
+cwd_avgplot <- cwd_df %>%
+  dplyr::filter(Park_Code == input$cwd_park) %>% 
+  dplyr::group_by(Park_Code,
+                  Subunit_Code,
+                  Plot_Code,
+                  Event_Type_Name, 
+                  Start_Date,
+                  Transect) %>%
+  dplyr::summarize(avg = mean(CWD_Diameter_cm)) %>%
+  ungroup() 
+
+cwd_avgplot <- cwd_avgplot %>%
+  ggplot(aes(y = avg, 
+             fill = Event_Type_Name)) + 
+  geom_boxplot() + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  facet_wrap(.~Plot_Code, nrow = ceiling(length(unique(cwd_count$Plot_Code))/5)) 
+
+page_height = (length(unique(cwd_count$Plot_Code))/5) * 150 + 150
+
+
+ rv$cwd_countplot <- ggplotly(cwd_countplot, 
+                              height = page_height) %>%
+                              layout(margin = list(
+    l = 50,
+  r = 50,
+  b = 100,
+  t = 100,
+  pad = 40))
+
+ rv$cwd_avgplot <- ggplotly(cwd_avgplot, height = page_height) %>%
+   layout(margin = list(
+    l = 50,
+  r = 50,
+  b = 100,
+  t = 100,
+  pad = 40))
+
+saveRDS(isolate(reactiveValuesToList(input)), paste0("cwd_input.RDS"))
+saveRDS(isolate(reactiveValuesToList(rv)), paste0("cwd_rv.RDS"))
+
+# saveRDS(isolate(reactiveValuesToList(input)), paste0("cwdpark_input.RDS"))
+# saveRDS(isolate(reactiveValuesToList(rv)), paste0("cwdpark_rv.RDS"))
+  
+})
+```
+
+
+```{r constancy 2}
+ # input <- list()
+ # input$community_groups <- c("Appalachian & Interior Mesophytic Forest")
+ # input$const_year <- "2013"
+
+observeEvent(eventExpr = input$button_UpdateConstancytbl, {
+  cat("Line 213")
+  shiny::req(!is.null(constancy_full), !is.null(input$community_groups), !is.null(input$const_year))
+  withProgress(message = "Just a moment", detail = "calculating constancy and cover values...", value = 0, {
+  
+if (input$const_year == "All") {
+  
+    cover_calc_OG <- constancy_full %>%
+  dplyr::select(Group_CUPNName, 
+                Network_Scientific_Name,
+                `Geometric Mean`) %>%
+  dplyr::group_by(Group_CUPNName,
+           Network_Scientific_Name) %>%
+  dplyr::summarise(Avg_MPC = mean(`Geometric Mean`)) %>%
+  ungroup()
+    
+   cover_calc <- cover_calc_OG %>%
+     dplyr::filter(Group_CUPNName %in% input$community_groups) #%>%
+  #     dplyr::mutate(Start_Date = lubridate::mdy(Start_Date))
+
+    constancy_count_test <- constancy_full %>%
+      dplyr::filter(Group_CUPNName %in% input$community_groups)
+ 
+} else {
+    cover_calc_OG <- constancy_full %>% 
+      dplyr::mutate(Start_Date = lubridate::mdy(Start_Date)) %>%
+      dplyr::filter(lubridate::year(Start_Date) %in% input$const_year) %>%
+      dplyr::select(Group_CUPNName, 
+                Network_Scientific_Name,
+                `Geometric Mean`) %>%
+      dplyr::group_by(Group_CUPNName,
+           Network_Scientific_Name) %>%
+      dplyr::summarise(Avg_MPC = mean(`Geometric Mean`)) %>%
+      ungroup()
+  
+    cover_calc <- cover_calc_OG %>%
+      dplyr::filter(Group_CUPNName %in% input$community_groups)
+  
+    constancy_count_test <- constancy_full %>%
+      dplyr::filter(Group_CUPNName %in% input$community_groups) %>%
+      dplyr::mutate(Start_Date = lubridate::mdy(Start_Date)) %>%
+      dplyr::filter(lubridate::year(Start_Date) %in% input$const_year)
+}
+    
+#Pivoting
+cover_calc <- cover_calc %>%
+  select(Network_Scientific_Name, Group_CUPNName, Avg_MPC) %>%
+    pivot_wider(names_from = Group_CUPNName, 
+    values_from = Avg_MPC
+  )
+
+#cover_calc
+
+cover_code <- cover_calc %>%
+  mutate_if(is.numeric, list(~case_when(
+    . >= 0 & . <=0.1~ "1",
+                     . >= 0.1 & . <=1~ "2",
+                     . >= 1 & . <= 2 ~ "3",
+                     . >= 2 & . <= 5 ~ "4",
+                     . >= 5 & . <= 10 ~ "5",
+                     . >= 10 & . <=25~ "6",
+                     . >= 25 & . <=50~ "7",
+                     . >= 50 & . <= 75 ~ "8",
+                     . >= 75 & . <=95 ~ "9",
+                     . >= 95 & . <= 100 ~ "10" )
+  ))
+
+cover_code <- cover_code %>%
+ # select(-Species_Original) %>% #general code would be -Network_Scientific_Name
+  rename_at(vars(-Network_Scientific_Name),function(x) paste0(x,"_Cover")) %>%
+  mutate_at(vars(-Network_Scientific_Name), as.integer)
+
+#Finding count of "event_name_date_calc" /species? across broad habitat types 
+constancy_count <- constancy_count_test %>%
+  dplyr::select(Group_CUPNName, Plot_Code, Network_Scientific_Name) %>%
+  dplyr::group_by(Group_CUPNName, Plot_Code, Network_Scientific_Name) %>%
+  dplyr::summarise(Species_Total = n()) %>%
+  ungroup() %>%
+  dplyr::group_by(Group_CUPNName, Network_Scientific_Name) %>%
+  dplyr::summarize(Num_Sp = n())
+
+  
+constancy_plot_num <- constancy_count_test %>%
+  dplyr::group_by(Group_CUPNName, Plot_Code) %>% #UNSURE IS EVENT_NAME_DATE_CALC IS A UNIVERSAL VARIABLE
+  dplyr::summarize(n()) %>%
+  ungroup() %>%
+  dplyr::group_by(Group_CUPNName) %>%
+  dplyr::summarize(Num_Plots = n())
+
+constancy_count <- left_join(constancy_count, constancy_plot_num, by = "Group_CUPNName")
+cat("Line238")
+
+constancy_count <- constancy_count %>% 
+  dplyr::group_by(Group_CUPNName) %>%
+  dplyr::mutate(Constancy = (Num_Sp/Num_Plots)*100) %>%
+  dplyr::select(Group_CUPNName, Network_Scientific_Name, Constancy) %>%
+  ungroup()
+
+constancy_count <- constancy_count %>%
+  #select(-Network_Scientific_Name) %>%
+  pivot_wider(names_from = Group_CUPNName, 
+              values_from = Constancy)
+
+constancy_count <- constancy_count %>%
+    rename_at(vars(-Network_Scientific_Name),function(x) paste0(x,"_Constancy"))
+
+
+constancy_count <- round_df(constancy_count, 0)
+
+
+constancy_final <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
+                           list(cover_code, constancy_count))
+# str(constancy_final)
+constancy_final[constancy_final == 0] <- NA
+
+constancy_final[is.na(constancy_final)] <- "-"
+
+constancy_final <- constancy_final  %>%
+  dplyr::mutate_at(vars(-Network_Scientific_Name), as.integer) %>%
+  tidyr::pivot_longer(cols = - Network_Scientific_Name,
+               names_to = "codes",
+               values_to = "value") %>%
+  dplyr::arrange(codes) %>%
+  tidyr::pivot_wider(names_from = "codes",
+              values_from = "value")
+
+names(constancy_final) = gsub(pattern = "_", replacement = " ", x = names(constancy_final))
+
+rv$constancy_final <- constancy_final
+
+cat("Line 275")
+
+saveRDS(isolate(reactiveValuesToList(input)), paste0("const_input.RDS"))
+saveRDS(isolate(reactiveValuesToList(rv)), paste0("const_rv.RDS"))
+
+cat("Line 123")
+})
+})
+```
+
+```{r cupn map 1}
+df_complatlong <- cupn_plots %>% #used to be cupn_plots_select
+  dplyr::mutate(Start_Date = lubridate::dmy(Start_Date)) %>% #try to get all of these dates in dplyr lubridate form
+  dplyr::rename(Park_Code = Unit_Code) %>%  # no longer need park code - WE ARE ONLY USING SUBUNIT CODESSSSSSS
+  dplyr::select(Park_Code, Subunit_Code, Plot_Code, Start_Date, Latitude, Longitude) %>%
+  dplyr::group_by(Plot_Code) %>%
+  slice(which.max(Start_Date)) %>%
+  dplyr::select(-Start_Date) %>%
+  drop_na() 
+
+```
+
+```{r cupn map 2, message = FALSE, results = FALSE, echo = FALSE}
+mp_compboundary <- st_read(here::here('./cupn_shapefile/CUPN.shp')) #used to be cupn_boundary
+
+mp_compboundary <- st_transform(mp_compboundary, crs = 4326)
+
+```
+
+```{r cupn map 4}
+df_treecomp <- tree_basics %>% #used to be tree_ba
+  dplyr::mutate(Status_Code == 1, 
+                Basal_Area_ha = ((pi * DBH^2) /40000)/0.04, 
+                Year = lubridate::year(lubridate::mdy(Start_Date)), ### should be redundant code....hmmm
+                Growth_Form = "Tree")
+
+df_treesum <- df_treecomp %>% #check with Jane calc
+  dplyr::group_by(Subunit_Code, Plot_Code, Start_Date, Year, Growth_Form) %>%
+  dplyr::summarise(Sum = sum(Basal_Area_ha)) %>%
+  tidyr::pivot_longer(cols = Sum, 
+                      names_to = "Genus", 
+                      values_to = "Count")
+
+df_treecomp %<>% #all_tree <- mptree_basics %>% 
+  dplyr::group_by(Subunit_Code, Plot_Code, Start_Date, Year, Genus, Growth_Form) %>%
+  dplyr::summarize(Count = n()) %>%
+  ungroup() %>%
+  dplyr::full_join(df_treesum)
+
+
+df_mapseedsap <- seedling_sapling %>%
+  dplyr::select(Subunit_Code, Plot_Code, 
+         Genus, 
+         Start_Date, Year, 
+         Sapling_0_1_DBH,
+         Sapling_1_2half_DBH, 
+         Sapling_2half_5_DBH,
+         Sapling_5_10_DBH) %>%
+  replace(is.na(.), 0) %>%
+  dplyr::mutate(SapCount = rowSums(across(where(is.numeric))), 
+                Growth_Form = "Sapling")
+
+#--------------------------------
+
+
+df_sapsum <- df_mapseedsap %>%
+  dplyr::group_by(Subunit_Code, Plot_Code, 
+           Start_Date, Year, Genus, Growth_Form) %>%
+  dplyr::summarize(Count = sum(SapCount)) %>%
+  ungroup()
+     
+
+df_sapba <- df_mapseedsap %>%
+  dplyr::group_by(Subunit_Code, Plot_Code, 
+           Start_Date, Year, Growth_Form) %>% ######## plot sum basal area --- not average!!!
+  dplyr::summarise(across(where(is.numeric), sum, na.rm = TRUE), .groups = "drop") %>%
+  ungroup() %>%
+  dplyr::mutate(Sapling01_BA = (0.00007854 * ((Sapling_0_1_DBH*0.5) ^2)),
+                Sapling12h_BA = (0.00007854* ((Sapling_1_2half_DBH*1.75) ^2)),
+                Sapling2h5_BA = (0.00007854 * ((Sapling_2half_5_DBH*3.25) ^2)),
+                Sapling510_BA = (0.00007854* ((Sapling_5_10_DBH*7.5)^2))) %>%
+  dplyr::group_by(Subunit_Code, Plot_Code, 
+           Start_Date, Year, Growth_Form) %>%
+  dplyr::summarise(Sum = sum(Sapling01_BA,
+                              Sapling12h_BA,
+                              Sapling2h5_BA,
+                              Sapling510_BA)/0.004) %>% ######should be 0.004 though.... for um jane 
+  tidyr::pivot_longer(cols = Sum, 
+               names_to = "Genus", 
+               values_to = "Count")
+
+df_sapcomp <- dplyr::full_join(df_sapsum, df_sapba) 
+
+
+#-------------------
+df_seedcomp <- seedling_sapling %>%
+  dplyr::select(Subunit_Code, Plot_Code, 
+         Genus, 
+         Start_Date, Year, 
+         Seedling_15_30_Tall,
+         Seedling_5_15_Tall, 
+         Seedling_30_50_Tall,
+         Seedling_50_137_Tall) %>%
+  replace(is.na(.), 0) %>%
+  dplyr::mutate(SeedCount = rowSums(across(where(is.numeric)))) %>%
+  dplyr::group_by(Subunit_Code, Plot_Code, 
+           Start_Date, Year, Genus) %>%
+  dplyr::summarize(Count = sum(SeedCount)) %>%
+  dplyr::mutate(Growth_Form = "Seedling")
+
+df_seedsum <- df_seedcomp %>%
+  dplyr::select(Subunit_Code, Plot_Code, Year, Start_Date, Growth_Form) %>%
+  dplyr::group_by(Subunit_Code, Plot_Code, Year, Start_Date, Growth_Form) %>%
+  distinct() %>%
+  dplyr::mutate(Genus = "Sum", 
+                Count = 40)
+
+df_seedcomp <- dplyr::full_join(df_seedcomp, df_seedsum) 
+
+df_spcomp <-  Reduce(function (...) { merge(..., all = TRUE) },  #full join idk why I can't just do a regular left join....
+                        list(df_treecomp, df_sapcomp, df_seedcomp))
+```
+
+
+```{r cupn map 5}
+# input <- list()
+# #
+# input$size_class = "Sapling"
+# input$map_year <- "2016"
+# input$map_subunit <- "GUCO" #check
+
+
+observeEvent(eventExpr = input$button_UpdateMap, {
+  shiny::req(!is.null(tree_basics), !is.null(input$map_subunit), !is.null(input$map_year), !is.null(input$size_class))
+
+ 
+#finding the top 8 species in a given subunit and year 
+ df_genuscomp <- tree_basics %>%
+    dplyr::filter(Year %in% input$map_year) %>% ###(Year %in% input$map_year) %>%
+    dplyr::filter(Subunit_Code == input$map_subunit) %>% #######"input$mapsubunit%>%
+   dplyr::group_by(Subunit_Code, Plot_Code, Year, Genus) %>%
+  dplyr::summarize(tree_obs = n()) %>%
+  ungroup() %>% #map_tree <- all_tree %>%
+  dplyr::group_by(Subunit_Code, Genus) %>%
+  dplyr::summarize(total_tree = sum(tree_obs)) %>%
+  top_n(7, total_tree) %>%
+  droplevels(.)
+
+top_species <- unique(df_genuscomp$Genus)
+top_species <- append(top_species, factor(c("Other", "Sum")))
+#------------
+spcomp <- df_spcomp %>%
+  dplyr::mutate(Plot_Genus = forcats::fct_other(Genus, 
+                                                   keep = top_species, 
+                                                   other_level = 'Other')) %>%
+  dplyr::group_by(Subunit_Code, Plot_Code, Year, Growth_Form, Plot_Genus) %>%
+  dplyr::summarise(Count = sum(Count)) %>%
+  ungroup()
+
+rv$spcomp <- spcomp
+
+df_spcompmap <- spcomp %>%
+  dplyr::filter(Growth_Form == input$size_class) %>%
+  tidyr::pivot_wider(
+      names_from = Plot_Genus,
+      values_from = Count) %>%
+  dplyr::select(-Other, Subunit_Code, Plot_Code, Year,  sort(tidyselect::peek_vars()), -Growth_Form)
+
+df_complatlong <- df_complatlong %>% 
+  dplyr::select(-Park_Code) %>%
+  dplyr::mutate(PlotNum = substr(Plot_Code, 5, 10))
+
+df_treecompmap <- left_join(df_spcompmap, df_complatlong, by = c("Subunit_Code", "Plot_Code"))
+
+df_treecompmap %<>%
+  dplyr::filter(!is.na(Latitude)) %>%
+  dplyr::filter(!is.na(Longitude)) %>%
+  replace(is.na(.), 0) %>%
+  filter(Year %in% input$map_year) %>%
+  dplyr::select(sort(names(.))) %>%
+  dplyr::select(-Other, everything())#new code to order genus alphabetically doesn't do it
+
+park_zoom <- df_complatlong %>%
+  dplyr::filter(Subunit_Code == input$map_subunit)
+
+bc = leaflet::leaflet(data = mp_compboundary) %>%
+    addTiles() %>%
+     addPolygons(data = mp_compboundary, color = ~ "black") #%>%
+
+cat("Line3")
+  
+  bc <- bc %>%
+    addCircleMarkers(data = df_treecompmap,
+               lng = ~Longitude,
+               lat = ~Latitude,
+               labelOptions = labelOptions(noHide = F),
+               layerId = ~Plot_Code,
+               group = "Markers"
+    ) %>%
+    addMinicharts(df_treecompmap$Longitude, #########CHANGE DATA
+                  df_treecompmap$Latitude,
+                chartdata = dplyr::select(df_treecompmap, -c(Subunit_Code, Plot_Code, PlotNum, Year, Latitude, Longitude, Sum)),
+    type = "pie",
+    width = sqrt(df_treecompmap$Sum) * 4,
+    col = Okabe_Ito,
+    showLabels = F,
+    ) %>%
+  addLabelOnlyMarkers(df_complatlong$Longitude,
+                      df_complatlong$Latitude,
+                      label =  df_complatlong$PlotNum,
+                      labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T, style=list('color'="#000000", 'fontSize'="18px"))) %>%
+    addScaleBar(position = "bottomright") %>%
+  fitBounds(min(park_zoom$Longitude), min(park_zoom$Latitude), max(park_zoom$Longitude), max(park_zoom$Latitude)) %>%
+    addLayersControl(
+      overlayGroups = c("Markers"), 
+      options = layersControlOptions(collapsed = FALSE)
+
+    )
+
+cat("Line4")
+
+
+ rv$bc <- bc
+
+ 
+saveRDS(isolate(reactiveValuesToList(input)), paste0("nc_input.RDS"))
+saveRDS(isolate(reactiveValuesToList(rv)), paste0("nc_rv.RDS"))
+
+})
+  
+#--------------
+click_marker <- eventReactive(input$leaflet_marker_click, {
+
+ site <- input$leaflet_marker_click
+
+ return(site$id)
+ 
+cat("line6453")
+})
+
+
+renderUI({
+  shiny::req(!is.null(click_marker), !is.null(rv$spcomp))
+  
+okabe_ito <- c( "#0072B2", "#D55E00", "#009E73", '#99DDFF', 
+                '#332288', '#882255', '#FFAABB', "#F0E442")
+
+color_pallete_function <- colorRampPalette(
+  colors = okabe_ito,
+  space = "Lab")
+
+maplevels <- rv$spcomp %>%
+  dplyr::filter(Plot_Genus != "Sum") %>%
+  droplevels()
+
+# unique(slevels$Plot_Genus)
+num_colors <- nlevels(maplevels$Plot_Genus)
+okabepalette <- color_pallete_function(num_colors)
+okabepalette <- setNames(okabepalette, levels(maplevels$Plot_Genus))
+
+okabepalette["Other"] <- "#333333"
+
+cat("Line324")
+
+colors <- sort(unique(maplevels$Plot_Genus)) #new new new still trying to get rid of sum
+  
+ # rv$df_spcompbar <- rv$spcomp %>%
+ # dplyr::filter(Plot_Genus != "Sum", #still in legend - maybe change in the nlevels
+rv$df_spcompbar <- maplevels %>%
+  dplyr::filter(Plot_Code == click_marker(),
+                Year %in% input$map_year) %>%
+  ggplot(aes(x = Growth_Form, y = Count, fill = Plot_Genus)) +
+  geom_bar(width = 0.45, 
+           position = "fill",
+           stat = "identity") +
+  theme_clean() +
+  labs(x = "", y = "") +
+  scale_x_discrete(limits = positions) +
+    scale_fill_manual(values = okabepalette[colors],
+#scale_fill_manual(values = okabepalette[unique(rv$spcomp$Plot_Genus)],
+                      drop = TRUE)
+
+cat("Line2323")
+})
+#----------------------
+
+
+# observeEvent(eventExpr = input$button_UpdateMap, {
+#   shiny::req(!is.null(tree_basics), !is.null(input$map_subunit), !is.null(input$map_year), !is.null(input$size_class))
+# 
+#  
+# #finding the top 8 species in a given subunit and year 
+#  df_genuscomp <- tree_basics %>%
+#    dplyr::mutate(Status_Code == 1) %>%
+#     dplyr::filter(Year %in% input$map_year) %>% ###(Year %in% input$map_year) %>%
+#     dplyr::filter(Subunit_Code == input$map_subunit) %>% #######"input$mapsubunit%>%
+#    dplyr::group_by(Subunit_Code, Plot_Code, Year, Genus) %>%
+#   dplyr::summarize(tree_obs = n()) %>%
+#   ungroup() %>% #map_tree <- all_tree %>%
+#   dplyr::group_by(Subunit_Code, Genus) %>%
+#   dplyr::summarize(total_tree = sum(tree_obs)) %>%
+#   top_n(7, total_tree) %>%
+#   droplevels(.)
+# 
+# top_species <- unique(df_genuscomp$Genus)
+# top_species <- append(top_species, factor(c("Other", "Sum")))
+# #------------
+# spcomp <- df_spcomp %>%
+#   dplyr::mutate(Plot_Genus = forcats::fct_other(Genus, 
+#                                                    keep = top_species, 
+#                                                    other_level = 'Other')) %>%
+#   dplyr::group_by(Subunit_Code, Plot_Code, Year, Growth_Form, Plot_Genus) %>%
+#   dplyr::summarise(Count = sum(Count)) %>%
+#   ungroup()
+# 
+# rv$spcomp <- spcomp
+# 
+# df_spcompmap <- spcomp %>%
+#   dplyr::filter(Growth_Form == input$size_class) %>%
+#   tidyr::pivot_wider(
+#       names_from = Plot_Genus,
+#       values_from = Count) %>%
+#   dplyr::select(-Other, Subunit_Code, Plot_Code, Year,  sort(tidyselect::peek_vars()), -Growth_Form)
+# 
+# df_complatlong <- df_complatlong %>% 
+#   dplyr::select(-Park_Code) %>%
+#   dplyr::mutate(PlotNum = substr(Plot_Code, 5, 10))
+# 
+# df_treecompmap <- left_join(df_spcompmap, df_complatlong, by = c("Subunit_Code", "Plot_Code"))
+# 
+# df_treecompmap %<>%
+#   dplyr::filter(!is.na(Latitude)) %>%
+#   dplyr::filter(!is.na(Longitude)) %>%
+#   replace(is.na(.), 0)
+#   
+# park_zoom <- df_complatlong %>%
+#   dplyr::filter(Subunit_Code == input$map_subunit)
+# 
+# bc = leaflet::leaflet(data = mp_compboundary) %>%
+#     addTiles() %>%
+#      addPolygons(data = mp_compboundary, color = ~ "black") #%>%
+# 
+# cat("Line3")
+#   
+#   bc <- bc %>%
+#     addCircleMarkers(data = df_treecompmap,
+#                lng = ~Longitude,
+#                lat = ~Latitude,
+#                labelOptions = labelOptions(noHide = F),
+#                layerId = ~Plot_Code,
+#                group = "Markers"
+#     ) %>%
+#     addMinicharts(df_treecompmap$Longitude, #########CHANGE DATA
+#                   df_treecompmap$Latitude,
+#                 chartdata = dplyr::select(df_treecompmap, -c(Subunit_Code, Plot_Code, PlotNum, Year, Latitude, Longitude, Sum)),
+#     type = "pie",
+#     width = sqrt(df_treecompmap$Sum) * 4,
+#     col = Okabe_Ito,
+#     showLabels = F,
+#     ) %>%
+#   addLabelOnlyMarkers(df_complatlong$Longitude,
+#                       df_complatlong$Latitude,
+#                       label =  df_complatlong$PlotNum,
+#                       labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T, style=list('color'="#000000", 'fontSize'="18px"))) %>%
+#     addScaleBar(position = "bottomright") %>%
+#   fitBounds(min(park_zoom$Longitude), min(park_zoom$Latitude), max(park_zoom$Longitude), max(park_zoom$Latitude)) %>%
+#     addLayersControl(
+#       overlayGroups = c("Markers"), 
+#       options = layersControlOptions(collapsed = FALSE)
+# 
+#     )
+# 
+# cat("Line4")
+# 
+# 
+#  rv$bc <- bc
+# 
+#  
+# saveRDS(isolate(reactiveValuesToList(input)), paste0("nc_input.RDS"))
+# saveRDS(isolate(reactiveValuesToList(rv)), paste0("nc_rv.RDS"))
+# 
+# })
+#   
+# click_marker <- eventReactive(input$leaflet_marker_click, {
+# 
+#  site <- input$leaflet_marker_click
+# 
+#  return(site$id)
+#  
+# cat("line6453")
+# })
+# 
+# 
+# renderUI({
+#   shiny::req(!is.null(click_marker), !is.null(rv$spcomp))
+#   
+# okabe_ito <- c( "#0072B2", "#D55E00", "#009E73", '#99DDFF', 
+#                 '#332288', '#882255', '#FFAABB', "#F0E442")
+# 
+# color_pallete_function <- colorRampPalette(
+#   colors = okabe_ito,
+#   space = "Lab")
+# 
+# rv$slevels <- rv$spcomp %>%
+#   dplyr::filter(Plot_Genus != "Sum") %>%
+#   droplevels()
+# 
+# # unique(slevels$Plot_Genus)
+# num_colors <- nlevels(rv$slevels$Plot_Genus)
+# okabepalette <- color_pallete_function(num_colors)
+# okabepalette <- setNames(okabepalette, levels(rv$slevels$Plot_Genus))
+# 
+# okabepalette["Other"] <- "#333333"
+# 
+# cat("Line324")
+# 
+# rv$colors <- sort(unique(rv$slevels$Plot_Genus)) #new new new still trying to get rid of sum
+#   
+#  # rv$df_spcompbar <- rv$spcomp %>%
+#  # dplyr::filter(Plot_Genus != "Sum", #still in legend - maybe change in the nlevels
+# rv$df_spcompbar <- rv$slevels %>%
+#   dplyr::filter(Plot_Code == click_marker(),
+#                 Year %in% input$map_year) %>%
+#   ggplot(aes(x = Growth_Form, y = Count, fill = Plot_Genus)) +
+#   geom_bar(width = 0.45, 
+#            position = "fill",
+#            stat = "identity") +
+#   theme_clean() +
+#   labs(x = "", y = "") +
+#   scale_x_discrete(limits = positions) +
+#     scale_fill_manual(values = okabepalette[rv$colors],
+# #scale_fill_manual(values = okabepalette[unique(rv$spcomp$Plot_Genus)],
+#                       drop = TRUE)
+# 
+# cat("Line2323")
+# })
+#--------------
+# click_marker <- eventReactive(input$leaflet_marker_click, {
+# 
+#  site <- input$leaflet_marker_click
+# 
+#  return(site$id)
+#  
+# cat("line6453")
+# })
+# 
+# 
+# renderUI({
+#   shiny::req(!is.null(click_marker), !is.null(rv$spcomp))
+#   
+# okabe_ito <- c( "#0072B2", "#D55E00", "#009E73", '#99DDFF', 
+#                 '#332288', '#882255', '#FFAABB', "#F0E442")
+# 
+# color_pallete_function <- colorRampPalette(
+#   colors = okabe_ito,
+#   space = "Lab")
+# 
+# num_colors <- nlevels(rv$spcomp$Plot_Genus)
+# okabepalette <- color_pallete_function(num_colors)
+# okabepalette <- setNames(okabepalette, levels(rv$spcomp$Plot_Genus))
+# 
+# okabepalette["Other"] <- "#333333"
+# 
+# cat("Line324")
+# 
+# rv$df_spcompbar <- rv$spcomp %>%
+#   dplyr::filter(Plot_Genus != "Sum", #still in legend - maybe change in the nlevels
+#                 Plot_Code == click_marker()) %>%
+#   ggplot(aes(x = Growth_Form, y = Count, fill = Plot_Genus)) +
+#   geom_bar(width = 0.45, 
+#            position = "fill",
+#            stat = "identity") +
+#   theme_clean() +
+#   labs(x = "", y = "") +
+#   scale_fill_manual(values = okabepalette[unique(rv$spcomp$Plot_Genus)],
+#                       drop = TRUE)
+# 
+# cat("Line2323")
+# })
+#----------------------
+
+
+
+```
+
+
+
+SER Veg Dashboard {data-width=650}
+=======================================================================
+
+### <font style="font-size: 20px"> Access Raw Data Here </font>
+
+```{r}
+
+# Tree Basics
+
+head(tree_basics)
+
+# tree_basics 
+# seedling_sapling <- read_csv(here::here("Data_In", "SeedlingSapling_20221013.csv"))
+# cwd <- read_csv(here::here("Data_In","CWD_Basics_20221013.csv"))
+# canopy_cover <- read_csv(here::here("Data_In","CanopyCover_20221021.csv"))
+# broadgroup <- read_csv(here::here("Data_In", "official_broadgroup.csv"))
+# species_rich <- read_csv(here::here("Data_In","SpeciesDiversity_LongFormat_20230421.csv")) #waiting on new data from Tim
+# stand_height <- read_csv(here::here("Data_In", "CUPN_StandHeight.csv"))
+# genus <- read_csv(here::here("Data_In", "CUPN_genus.csv"))
+# cupn_plots <- read_csv(here::here("Data_In", "CUPN_PlotEvents_LatLong.csv"))
+# constancy <- read_csv(here::here("Data_In", "CUPN_SpeciesCover.csv"))
+# cover_code <- read_csv(here::here("Data_In", "cover_class_codes.csv"))
+
+```
+
+Relative Prop of Species Groups {data-orientation=columns}
+=======================================================================
+
+Inputs {.sidebar data-width=400}
+-------------------------------------
+```{r sidebar input}
+renderUI({
+  shiny::req(!is.null(tree_full))
+
+  selectInput(
+    "prop_year", 
+    label = "Select Year: ", 
+    choices = c("All", sort(unique(lubridate::year(tree_full$Start_Date)))), 
+    selected = switch(is.null(input$prop_year)+1, input$prop_year, "ALL")
+)
+
+})
+
+actionButton("button_UpdatePlots", "Update Plots")
+
+selectInput(
+  "Spatial_Scale",
+  label = "Select Spatial Scale: ",
+  choices = c("Network_Code", "Park_Code", "Subunit_Code")
+)
+
+
+#selectInput only shows column name when just one value is possible
+renderUI({ #needed bc reactive
+  shiny::req(!is.null(input$Spatial_Scale), !is.null(tree_full))
+  selectInput(
+    "Individual_Unit",
+    label = paste0("Select Individual Unit of ", input$Spatial_Scale, ":" ),
+    choices = unique(tree_full[input$Spatial_Scale])
+  )
+
+})
+
+
+renderUI({
+  shiny::req(!is.null(input$Spatial_Scale), !is.null(input$Individual_Unit), !is.null(rv$df_treeyr))
+
+  communitychoice <- rv$df_treeyr %>%
+    dplyr::filter(!!as.name(input$Spatial_Scale) == input$Individual_Unit) %>%
+    distinct(Association_CommonName) %>%
+    pull(.)
+
+
+  checkboxGroupInput(
+    "Association",
+    label = "Select at least one Community Group",
+    choices = communitychoice
+  )
+
+})
+
+```
+
+
+Column
+-------------------------------------
+
+```{r}
+output$plotly_tree <- renderPlotly({
+  shiny::req(!is.null(rv$plotly_tree))
+  rv$plotly_tree})
+
+plotlyOutput("plotly_tree")
+
+```
+
+CWD Visualizations
+=======================================================================
+### <font style="font-size: 20px"> CWD </font>
+
+*<font size="3"> Testing.* </font>
+*<font size="3"> Testing.* </font>
+*<font size="3"> Testing.* </font>
+
+Inputs {.sidebar data-width=225}
+-------------------------------------
+```{r}
+
+actionButton("button_UpdateCWD", "Update Tables")
+
+selectInput(
+    "cwd_park",
+    label = strong("Select Park: "),
+    choices = sort(unique(cwd$Park_Code)),
+    selected =  "ABLI")
+ 
+# input <- list() 
+# input$cwd_park <- "COWP"
+
+renderUI({
+  shiny::req(!is.null(cwd))
+  
+  year_cwd <- cwd %>%
+    dplyr::filter(Park_Code == input$cwd_park) %>%
+    distinct(lubridate::year(lubridate::mdy(Start_Date)))%>%
+    pull(.)
+  
+  
+  selectInput(
+  "cwd_yr", 
+  label = strong("Select Year: "), 
+  choices = c("All", sort(year_cwd)), 
+  selected = "All"
+)
+
+  })
+
+```
+
+Column {.tabset}
+-------------------------------------
+### CWD Count 
+```{r fig.height =10}
+output$cwd_countplot <- renderPlotly({
+  shiny::req(!is.null(rv$cwd_countplot))
+  
+  rv$cwd_countplot
+  })
+
+plotlyOutput("cwd_countplot")
+
+```
+
+
+### CWD Average
+```{r fig.height =10}
+# output$cwd_avgplot <- renderPlotly({
+#   shiny::req(!is.null(rv$cwd_avgplot))
+#   
+#   rv$cwd_avgplot
+#   })
+# 
+# plotlyOutput("cwd_avgplot")
+```
+
+
+Maps
+=======================================================================
+```{r}
+div(
+  style = "display: flex; flex-wrap: wrap;",
+  
+  div(
+    style = "margin-right: 30px; align-self: center; ",
+    actionButton("button_UpdateMap", "Update Map")
+   ), 
+  
+  div(
+    
+    renderUI({
+    shiny::req(!is.null(tree_basics))
+    
+  selectInput(
+    "map_subunit",
+    label = strong("Select a Park: "),
+    choices = sort(unique(tree_basics$Subunit_Code)),
+    selected = switch(is.null(input$map_subunit)+1, input$map_subunit, "BIRT")
+    )
+})
+), 
+
+
+div(renderUI({
+  shiny::req(!is.null(tree_basics), !is.null(input$map_subunit))
+  
+  treemapyr <- tree_basics %>%
+    dplyr::filter(Subunit_Code == input$map_subunit) %>%
+    distinct(Year) %>%
+    pull(.)
+    
+  selectInput(
+    "map_year", 
+    label = strong("Select Year: "),
+    choices = sort(treemapyr), 
+    selected = min(treemapyr)
+  )
+  
+})
+), 
+
+
+div(renderUI({
+  shiny::req(!is.null(tree_basics))
+  
+  selectInput(
+    "size_class", 
+    label = strong("Select a size class: "), 
+    choices = c("Tree", "Sapling", "Seedling"), 
+    selected = "Tree"
+  )
+})
+)
+)
+
+```
+
+Rows
+-----------------------------------------------------------------------
+
+### 
+
+```{r CUPN map}
+output$leaflet <- renderLeaflet({
+  shiny::req(!is.null(rv$bc)) 
+  rv$bc
+  })
+
+leafletOutput("leaflet", height = "95vh")
+
+```
+
+###
+
+```{r}
+
+output$map_tree <- renderPlot({
+  shiny::req(!is.null(rv$df_spcompbar))
+  
+  rv$df_spcompbar})
+
+plotOutput("map_tree")
+```
+
+
+Species Richness {data-width=650}
+=======================================================================
+
+### <font style="font-size: 20px"> Species Richness </font>
+
+*<font size="3"> This table shows vascular plant species richness at different spatial groupings (Network, Park, Subunit, OTHER SPATIAL GROUPING) across years and at different plot units (400m2, 100m2, 10m2, 1m2).* </font>
+*<font size="3"> Data are summarized  by total number of native versus non-native species/plot, and by vegetative growth forms.* </font>
+*<font size="3">  Growth form information was obtained from the USDA Plants Database (USDA 2020)*</font>
+
+
+Inputs {.sidebar data-width=225}
+-------------------------------------
+```{r}
+actionButton("button_UpdateRichTable", "Update Tables")
+
+selectInput(
+  "rich_year", 
+  label = strong("Select Year: "), 
+  choices = c("All", sort(unique(lubridate::year(plot_rich$Start_Date)))), 
+  selected = "All"
+)
+
+renderUI({
+  shiny::req(!is.null(input$rich_year), !is.null(plot_rich))
+  selectInput(
+    "rich_group",
+    label = strong("Spatial Grouping: "),
+    choices = c("Park_Code","Subunit_Code"),
+    selected =  "Park_Code")
+  })
+# <font size="2"> **Species Richness. This table shows vascular plant species richness at different spatial groupings (Network, Park, Subunit) across years and at different plot units (400m2, 100m2, 10m2, 1m2). Data are summarized  by total number of native versus non-native species/plot, and by vegetative growth forms. Growth form information was obtained from the USDA Plants Database (USDA 2020).**</font>
+```
+
+Column
+-------------------------------------
+
+```{r}
+#make the tool tips into a function paste("Herb") into the tooltip
+output$richness <- renderReactable({
+  shiny::req(!is.null(rv$df_rich), !is.null(rv$df_plotrich), !is.null(rv$selected_richgroup))
+
+
+group400 <- c("Native<sup>a</sup>", "Non-Native<sup>a</sup>", "Unknown<sup>a</sup>", "H <sup>a</sup>", "S <sup>a</sup>", "T <sup>a</sup>", "TS <sup>a</sup>")
+group100<- c("H <sup>b</sup>", "S <sup>b</sup>", "T <sup>b</sup>", "TS <sup>b</sup>")
+group10 <- c("H <sup>c</sup>", "S <sup>c</sup>", "T <sup>c</sup>", "TS <sup>c</sup>")
+group1 <- c("H <sup>d</sup>", "S <sup>d</sup>", "T <sup>d</sup>", "TS <sup>d</sup>")
+  
+  reactable::reactable(rv$df_rich,
+                       defaultColGroup = colGroup(headerClass = "group", headerVAlign = "bottom"),
+    columnGroups = list(
+      colGroup(name = "400 m2 Plot", columns = group400), 
+      colGroup(name = "100 m2 Plot", columns = group100),
+      colGroup(name = "10 m2 Plot", columns = group10), 
+      colGroup(name = "1 m2 Plot", columns = group1)
+    ),
+                     defaultColDef = colDef(vAlign = "center",
+                                            headerVAlign = "bottom",
+                                            align = "left",
+                                            class = "group",
+                                            headerClass = "header",
+                                            maxWidth = 55,
+                                           # headerStyle = list(fontWeight = 500)
+                                            ),
+                     columns = list(
+                       `Park_Code` = colDef(name= "Park Code",  filterable = TRUE, html = FALSE, maxWidth = 220),
+                       `Subunit_Code` = colDef(name = "Subunit Code", filterable = TRUE, maxWidth = 220),
+                      `Native<sup>a</sup>` = colDef(header = with_tooltip("Native", "Average native species richness across all 400m2 plots"),html = TRUE, maxWidth = 70),
+                      `Non-Native<sup>a</sup>` = colDef(header = with_tooltip("Non-Native", "Average non-native species richness across all 400m2 plots"), html = TRUE, maxWidth = 70),
+                      `Unknown<sup>a</sup>` = colDef(header = with_tooltip("Unknown", "Average unknown species richness across all 400m2 plots"), html = TRUE, maxWidth = 70),
+                       `H <sup>a</sup>` = colDef(header = with_tooltip("H", "Average herb species richness across all 400m2 plots"), html = TRUE, class = "border-left"),
+                      `S <sup>a</sup>` = colDef(header = with_tooltip("S", "Average shrub species richness across all 400m2 plots"), html = TRUE),
+                      `T <sup>a</sup>` = colDef(header = with_tooltip("T", "Average tree species richness across all 400m2 plots"), html = TRUE),
+                      `TS <sup>a</sup>` = colDef(header = with_tooltip("TS", "Average tree shrub species richness across all 400m2 plots"), html = TRUE),
+                      `H <sup>b</sup>` = colDef(header = with_tooltip("H", "Average herb species richness across all 100m2 plots"), html = TRUE, class = "border-left"),
+                      `S <sup>b</sup>` = colDef(header = with_tooltip("S", "Average shrub species richness across 100m2 plots"), html = TRUE),
+                      `T <sup>b</sup>` = colDef(header = with_tooltip("T", "Average tree species richness across all 100m2 plots"), html = TRUE),
+                      `TS <sup>b</sup>` = colDef(header = with_tooltip("TS", "Average tree shrub species richness across all 100m2 plots"), html = TRUE),
+                      `H <sup>c</sup>` = colDef(header = with_tooltip("H", "Average herb species richness across all 10m2 plots"), html = TRUE, class = "border-left"),
+                      `S <sup>c</sup>` = colDef(header = with_tooltip("S", "Average shrub species richness across all 10m2 plots"),html = TRUE),
+                      `T <sup>c</sup>` = colDef(header =with_tooltip("T", "Average tree species richness across all 10m2 plots"),html = TRUE),
+                      `TS <sup>c</sup>` = colDef(header = with_tooltip("TS", "Average tree shrub species richness across all 10m2 plots"),html = TRUE),
+                      `H <sup>d</sup>` = colDef(header = with_tooltip("H", "Average herb species richness across all 1m2 plots"), html = TRUE, class = "border-left"),
+                      `S <sup>d</sup>` = colDef(header = with_tooltip("S", "Average shrub species richness across all 1m2 plots"),html = TRUE),
+                      `T <sup>d</sup>` = colDef(header = with_tooltip("T", "Average tree species richness across all 1m2 plots"),html = TRUE),
+                      `TS <sup>d</sup>` = colDef(header = with_tooltip("TS", "Average tree shrub species richness across all 1m2 plots"),html = TRUE)
+                      ),
+                     pagination = FALSE,
+                     highlight = TRUE,
+                     fullWidth = TRUE, 
+                     resizable = T#, 
+                     #compact = T
+                     ,
+                     details = function(index) {
+                       sub_plotrich <- rv$df_plotrich %>% dplyr::filter(get(rv$selected_richgroup) == rv$df_rich[rv$selected_richgroup][index, ])
+                       htmltools::div(
+                         style = "padding: 20px",
+                         reactable(sub_plotrich,
+                                   defaultColDef = colDef(vAlign = "center",
+                                                          headerVAlign = "bottom",
+                                                          html = TRUE,
+                                                          maxWidth = 55,
+                                                          align = "left"
+                                   ,
+                                   class = "cell",
+                                   headerClass = "header",
+                                   headerStyle = list(fontWeight = 500)
+                                   ),
+                                  columns = list(
+                                    `Subunit_Code` = colDef(name = "Subunit Code", maxWidth = 70),
+                                    `Plot_Code` = colDef(name = "Plot Code", class = "cell") ,
+                                    `Start_Date` = colDef(name = "Survey Date", maxWidth = 70),
+                                    `Native<sup>a</sup>` = colDef(header = with_tooltip("Native", "Native species richness at 400m2 plot scale"),html = TRUE, maxWidth = 70),
+                                    `Non-Native<sup>a</sup>` = colDef(header = with_tooltip("Non-Native", "Non-Native species richness at 400m2 plot scale"), html = TRUE, maxWidth = 70),
+                                    `Unknown<sup>a</sup>` = colDef(header = with_tooltip("Unknown", "Unknown species richness at 400m2 plot scale"), html = TRUE, maxWidth = 70),
+                                    `H <sup>a</sup>` = colDef(header = with_tooltip("H", "Total herb species richness at 400m2 plot scale"), html = TRUE, class = "border-left"),
+                                    `S <sup>a</sup>` = colDef(header = with_tooltip("S", "Total shrub species richness at 400m2 plot scale"), html = TRUE),
+                                    `T <sup>a</sup>` = colDef(header = with_tooltip("T", "Total tree species richness at 400m2 plot scale"), html = TRUE),
+                                    `TS <sup>a</sup>` = colDef(header = with_tooltip("TS", "Total tree shrub species richness at 400m2 plot scale"), html = TRUE),
+                                    `H <sup>b</sup>` = colDef(header = with_tooltip("H", "Average herb species richness across 100m2 modules"), html = TRUE, class = "border-left"),
+                                    `S <sup>b</sup>` = colDef(header = with_tooltip("S", "Average shrub species richness across 100m2 modules"), html = TRUE),
+                                    `T <sup>b</sup>` = colDef(header = with_tooltip("T", "Average tree species richness  across 100m2 modules"), html = TRUE),
+                                    `TS <sup>b</sup>` = colDef(header = with_tooltip("TS", "Average tree shrub species richness across 100m2 modules"), html = TRUE),
+                                    `H <sup>c</sup>` = colDef(header = with_tooltip("H", "Average herb species richness across 10m2 modules"), html = TRUE, class = "border-left"),
+                                    `S <sup>c</sup>` = colDef(header = with_tooltip("S", "Average shrub species richnessacross 10m2 modules"),html = TRUE),
+                                    `T <sup>c</sup>` = colDef(header =with_tooltip("T", "Average tree species richness across 10m2 modules"),html = TRUE),
+                                    `TS <sup>c</sup>` = colDef(header = with_tooltip("TS", "Average tree shrub species richness across 10m2 modules"),html = TRUE),
+                                    `H <sup>d</sup>` = colDef(header = with_tooltip("H", "Average herb species richness across 1m2 modules"), html = TRUE, class = "border-left"),
+                                    `S <sup>d</sup>` = colDef(header = with_tooltip("S", "Average shrub species richness across 1m2 modules"),html = TRUE),
+                                    `T <sup>d</sup>` = colDef(header = with_tooltip("T", "Average tree species richness across 1m2 modules"),html = TRUE),
+                                    `TS <sup>d</sup>` = colDef(header = with_tooltip("TS", "Average tree shrub species richness across 1m2 modules"),html = TRUE)),
+                                  compact = TRUE, 
+                                  pagination = FALSE
+
+
+                                   )
+                       )
+                                   }
+                     )
+})
+
+
+reactableOutput("richness")
+
+# saveRDS(df_parkrich, here::here("df_parkrich.RDS"))
+# saveRDS(df_plotrich, here::here("df_plotrich.RDS"))
+```
+
+
+Woody Plant Characteristics 
+=======================================================================
+### <font style="font-size: 20px"> Woody Plant Metrics </font>
+
+*<font size="3">This table shows woody stem abundance and canopy metrics at different spatial groupings and across year.* </font>
+*<font size="3"> Density metrics were calculated for trees, saplings, and seedlings at sampled area. * </font>
+*<font size="3"> Basal Area (BA) was calculated at the m2/ha scale. * </font>
+
+Inputs {.sidebar data-width=225}
+-------------------------------------
+```{r echo=FALSE}
+
+
+actionButton("button_UpdateTable", "Update Table") 
+
+selectInput(
+  "year", 
+  label = strong("Select Year: "), 
+  choices = c("All", sort(unique(df_treeplot$Year))), 
+  selected = "All")
+
+renderUI({
+  shiny::req(!is.null(input$year), !is.null(df_treeplot))
+  selectInput(
+  "group_var",
+  label = strong("Spatial Grouping: "),
+  choices = c("Park Code","Subunit Code"),
+  selected =  "Park Code")
+  
+})
+
+```
+
+Row
+-------------------------------------
+
+```{r}
+output$seedsapplot <- renderReactable({
+  shiny::req(!is.null(input$year), !is.null(rv$df_treeplot), !is.null(input$group_var))
+  
+  rv$df_treeplot
+  
+})
+
+reactableOutput("seedsapplot")
+
+```
+
+
+Cover/Constancy {data-orientation=columns}
+=======================================================================
+
+
+Inputs {.sidebar data-width=225}
+-------------------------------------
+```{r}
+actionButton("button_UpdateConstancytbl", "Update Tables")
+
+renderUI({
+  shiny::req(!is.null(constancy_full))
+  
+  selectInput(
+    "const_year", 
+    label = "Select Year: ", 
+    choices = c("All", sort(unique(lubridate::year(mdy(constancy_full$Start_Date))))), 
+    selected = switch(is.null(input$const_year)+1, input$const_year, "ALL")
+)
+})
+
+renderUI({
+  shiny::req(!is.null(constancy_full), !is.null(input$const_year))
+
+  if (input$const_year == "All") {
+    communitygroup <- constancy_full %>%
+    distinct(Group_CUPNName) %>%
+    pull(.) 
+    
+  } else {
+  communitygroup <- constancy_full %>%
+    dplyr::filter(lubridate::year(mdy(Start_Date)) == input$const_year) %>%
+    distinct(Group_CUPNName) %>%
+    pull(.)
+  
+  }
+
+  selectizeInput(
+  "community_groups", 
+  label = strong("Select Up to 3 Community Groups: "), 
+  choices = c("", sort(communitygroup)), 
+  selected = "", 
+  multiple = TRUE, options = list(maxItems = 3)
+)
+
+})
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+```{r}
+
+# reactable(constancy_final)
+renderReactable({
+  cat("Line310")
+  shiny::req(!is.null(rv$constancy_final))
+  
+  cat("Line311")
+                         
+  reactable::reactable(rv$constancy_final, 
+            defaultPageSize = 50, 
+            highlight = TRUE,
+            bordered = TRUE,
+            pagination = FALSE,
+            compact = TRUE,
+            resizable = TRUE,
+            showPageSizeOptions = TRUE, 
+            fullWidth = TRUE,
+            defaultColDef = colDef(vAlign = "center",
+                                   class = "cell",
+                                   headerClass = "header",
+                                   headerStyle = list(fontWeight = 500),
+                                   headerVAlign = "bottom",
+                                   html = TRUE,
+                                   align = "left", 
+                                   maxWidth= 150), 
+            columns = list(
+              `Network Scientific Name` = colDef(name = "Species",
+                                                 class = "cellitalics",
+                                                 maxWidth = 350)
+            ))
+
+  })
+
+  
+```
+
+
+

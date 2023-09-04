@@ -1,0 +1,561 @@
+---
+title: "Relative Proportion of Species Graph"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+    theme:  
+          version: 4
+          bootswatch: litera
+runtime: shiny
+
+---
+
+
+```{r}
+###### Most updated working version of the dashboard 
+
+
+########## UPDATES
+#index of cover
+#on cover/constancy page - put range next to cover 0.0 - 0.1 (1)
+#on cover - per habitat group - include number of total plots in the label
+# change table - from index of cover - how many plots
+    ### check with NETN and look for a citation on cover codes
+
+#constancy label = total num plots occupied
+#constancy = number of plots = % plots present/occupied (constancy)
+#within cell, occupancy 75% (n=6)
+
+
+##cwd histograms - ggridge - bin the diameters by 10s, each bar is how many observations are in each bin
+### shift by year
+#page height is determined by number of columns
+
+```
+
+
+```{r include = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+#qaqc list - put in document this dashboard does this to clean the dashboard
+#do the DBH - BA conversion - would need the event table
+#data check page, highlight records with potential problems
+#reactables filter each column
+#tbl_
+#plot_
+#df_
+
+```
+
+```{r setup, include=FALSE}
+
+rm(list=ls())
+### NOTES
+# Converted all tibbles to data frames to get rid of phantom column name errors
+
+### NAMING RULES
+# Functions: FuncTest(dat1_there, dat2_here)
+# Action buttons: button_PushMe
+# User inputs: sel_SelectMe
+# Lists, data frames, vectors, variables...: station_files_list, station_df,  station_vec, here_is_a_variable
+# Data frame cols: df$ColThisOne, df$ColThatOne
+# List elements: list$ElementOne, list$ElementTwo
+# Reactive elements: rv$ThisOne, rv$ThatOne
+# Temporary variables: temp_this_df
+# Well panel id's: wp_FilterParkSite
+
+#options(url.method = "wininet")
+#options(repos="http://cran.revolutionanalytics.com")
+#options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+### Load libraries -----
+# Will automatically install any libraries it can't find
+pkgs <- c("flexdashboard", 
+              "shiny", 
+              "knitr", 
+              "odbc", # pull data from SQL server
+              "leaflet", 
+              "here",
+              "plotly", 
+              "tidyverse", 
+              "plyr", 
+              "sf",
+              "readr",
+              "magrittr",
+              "bslib", 
+              "ggplot2",
+              "patchwork",
+              "leaflet.extras", 
+              "lubridate",
+              "forcats",
+              "httr", # use web services
+              "rgdal", # to use readOGR
+              "sp", # transform projections
+              "purrr", # for applying functions to dplyr groups
+              "dataMaid", # for data checks
+              "shinyFiles", # for user to save files in specified location
+              "RColorBrewer", # to display brewer palettes
+              "shinyjs", # for easy functions that use JavaScript
+              "stringr", # to detect text snippets
+              "reactable",
+              "reactablefmtr",
+              "base", 
+              "htmltools", 
+              "ggthemes",
+              "data.table", # for fast lag calcs
+              "DT", # for interactive tables
+              "cowplot", # to get legends from plots
+              "crosstalk", # for SharedData
+              "gridExtra", # for arranging plots and adding plot annotations (ggplotly can't do captions or subtitles)
+              "RgoogleMaps", # for MaxZoom & MinZoom
+              "leaflet.minicharts") # for pie charts in leaflet maps
+
+
+installed_pkgs <- pkgs %in% installed.packages()
+if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE) 
+lapply(pkgs, library, character.only = TRUE)
+
+invisible(lapply(pkgs, library, character.only = TRUE))
+
+options(shiny.maxRequestSize=60*1024^2) #increase the file upload limit to 90MB.
+
+rv <- reactiveValues(SeedlingSapling = NULL, SpeciesDiversity = NULL, Tree = NULL, CanopyCover = NULL, StandHeight = NULL, Genus = NULL, LatLong = NULL, Species_Cover = NULL, Cover_Class = NULL, Exotics = NULL, CWD = NULL, BroadGroup = NULL, CycleNumber = NULL)
+
+temp_rv <- shiny::reactiveValues(
+  df_rich = NULL, 
+  plotly_tree = NULL, 
+  df_treeplot = NULL, 
+  df_treeyr = NULL,
+  selected_richgroup = NULL, 
+  constancy_final = NULL, 
+  cwd_df = NULL, 
+  cwd_obs = NULL, 
+  cwd_countplot = NULL, 
+  cwd_avgplot = NULL, 
+  df_spcompbar = NULL, 
+  df_tree = NULL#######NEW
+)
+```
+
+```{r data}
+# reading in data -----
+# setwd("C:/Users/kseeger/OneDrive - DOI/Desktop/GIT_RSTUDIO/FLEXDASHBOARD")
+
+# Reading in CSV files
+tree_basics <- read_csv(here::here("Data_In", "TreeBasics_20221013.csv"))
+seedling_sapling <- read_csv(here::here("Data_In", "SeedlingSapling_20221013.csv"))
+cwd <- read_csv(here::here("Data_In","CWD_Basics_20221013.csv"))
+canopy_cover <- read_csv(here::here("Data_In","CanopyCover_20221021.csv"))
+broadgroup <- read_csv(here::here("Data_In", "BroadGroup.csv")) #used to be broadgroup
+species_rich <- read_csv(here::here("Data_In","SpeciesDiversity_LongFormat_20230421.csv")) #waiting on new data from Tim
+stand_height <- read_csv(here::here("Data_In", "CUPN_StandHeight.csv"))
+genus <- read_csv(here::here("Data_In", "CUPN_Genus.csv"))
+cupn_plots <- read_csv(here::here("Data_In", "CUPN_PlotEvents_LatLong.csv"))
+constancy <- read_csv(here::here("Data_In", "CUPN_SpeciesCover.csv"))
+cover_code <- read_csv(here::here("Data_In", "CoverClass.csv"))
+cupn_exotics <- read_csv(here::here("Data_In", "CUPN_HighPriorityExotics.csv"), locale=locale(encoding="latin1"))
+
+```
+
+```{r functions}
+### Functions-----
+
+#rounding function 
+#stick to a certain function naming rule
+round_df <- function(x, digits) {
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x
+}
+
+options(scipen=999)
+
+#keeping only first letter of character
+makeInitials <- function(charVec) {
+  make.unique(vapply(strsplit(toupper(charVec), " "), 
+                     function(x) paste(substr(x, 1, 1), collapse = ""), 
+                     vector("character", 1L)))
+}
+
+
+Okabe_Ito <- c("#009E73","#F0E442", "#0072B2", "#D55E00", 
+               "#CC79A7", "#000000",'#DDDDDD', '#EE6678', '#99DDFF', 
+               '#BBCC33', '#332288', '#882255', '#FFAABB')
+
+okabe_ito <- c( "#0072B2", "#D55E00", 
+               "#CC79A7", "#000000",  '#CC6677', '#BBCC33', '#99DDFF', 
+                '#332288', '#882255', '#FFAABB', "#E69F00", "#56B4E9", "#009E73", "#F0E442")
+
+viridis <- c("#fde725", "#5ec962", "#21918c","#3b528b","#440154")
+
+
+makefun <- function(data) {
+  data %>% 
+  dplyr::group_by(Plot_Code, Year) %>%
+  dplyr::summarize(n())
+  
+}
+##### css functions
+integer_columns <- function(maxWidth = 60, ...) {
+  colDef(maxWidth = maxWidth, align = "center",...)
+}
+
+with_tooltip <- function(value, tooltip) {
+  tags$abbr(style = "text-decoration: underline; text-decoration-style: dotted; cursor: help", title = tooltip, value)
+}
+```
+```{css styles}
+.border-left {
+  border-left: 14px solid #000;
+  font-size: 12px
+}
+
+.header { 
+  border-bottom-color: #555;
+  border-top-color: #555;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.group {
+  font-size: 12px;
+}
+
+.reactable {
+font-size: 12px; 
+}
+
+.cell {
+  font-size: 12px;
+
+}
+
+.cellitalics {
+  font-style: italic;
+}
+```
+
+```{r}
+genus <- genus %>%
+  dplyr::select(-Space_Index)
+
+tree_basics <- tree_basics %>%
+  dplyr::mutate(Year = lubridate::year(lubridate::mdy(Start_Date))) %>%
+  dplyr::filter(Event_Type_Name != "QA/QC") %>% 
+  left_join(genus) %>%
+  dplyr::mutate(Genus = as.factor(Genus))
+
+seedling_sapling <- seedling_sapling %>%
+  dplyr::mutate(Year = lubridate::year(lubridate::mdy(Start_Date))) %>%
+  dplyr::filter(Event_Type_Name != "QA/QC") %>%
+  left_join(genus) %>%
+   dplyr::mutate(Year = as.factor(Year), 
+                 Genus = as.factor(Genus))
+
+positions <- c("Seedling", "Sapling", "Tree")
+
+broadgroup <- broadgroup %>%
+  dplyr::select(Network_Code, Park_Code, Subunit_Code, Plot_Code, Start_Date, Event_Type_Name, Association_TranslatedName, Association_CommonName, Group_CUPNName)
+
+cover_code <- cover_code %>%
+  dplyr::select(-`Cover Range (%)`)
+
+species_rich <- species_rich %>%
+  dplyr::filter(Event_Type != "QA/QC") %>% #should be event_type_name
+  tidyr::replace_na(list(Nativity = "Unknown")) %>%
+  dplyr::mutate(Start_Date = lubridate::mdy(Start_Date)) 
+
+#--------------
+cwd <- cwd %>%
+  dplyr::filter(Event_Type_Name != "QA/QC")
+
+constancy_full <-  Reduce(function (...) { merge(..., all = TRUE) },  
+                           list(constancy, cover_code, broadgroup, genus))
+constancy_full %<>% 
+  dplyr::filter(Event_Type != "QAQC" | Event_Type != "training")
+```
+
+```{r prop tree basics}
+#Tree_Basics 
+tree_basics_barplot <- tree_basics %>%
+  dplyr::filter(Status_Code == 1) %>%
+  dplyr::group_by(Plot_Code,
+           Plant_Code, Genus,
+           Event_Type_Name,
+           Start_Date) %>%
+  dplyr::summarize(Tree = n())
+```
+
+```{r prop seedsap basics}
+
+#Seedling Sapling Count 
+sapling_barplot <- seedling_sapling %>%
+  dplyr::select(Plot_Code, 
+         Plant_Code, Genus, 
+         Start_Date, 
+         Event_Type_Name, 
+         Sapling_0_1_DBH,
+         Sapling_1_2half_DBH, 
+         Sapling_2half_5_DBH,
+         Sapling_5_10_DBH) %>%
+  replace(is.na(.), 0) %>%
+  dplyr::mutate(SapCount = rowSums(across(where(is.numeric))))
+    
+sapling_barplot <- sapling_barplot %>%
+  dplyr::group_by(Plot_Code, 
+           Start_Date, 
+           Event_Type_Name,
+           Plant_Code, Genus) %>%
+  dplyr::summarize(Sapling = sum(SapCount))
+      
+#Seedling Count
+seedling_barplot <- seedling_sapling %>%
+  dplyr::select(Plot_Code,
+         Plant_Code, Genus,
+         Start_Date,
+         Event_Type_Name,
+         Seedling_15_30_Tall,
+         Seedling_5_15_Tall, 
+         Seedling_30_50_Tall,
+         Seedling_50_137_Tall) %>%
+  replace(is.na(.), 0) %>%
+  dplyr::mutate(SeedCount = rowSums(across(where(is.numeric))))
+    
+seedling_barplot <- seedling_barplot %>%
+  dplyr::group_by(Plot_Code, Start_Date, Event_Type_Name, Plant_Code, Genus) %>%
+  dplyr::summarize(Seedling = sum(SeedCount))
+ 
+#Creating table with sum counts woody strata 
+
+tree_full <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
+                           list(seedling_barplot,
+                                sapling_barplot,
+                                tree_basics_barplot))
+
+```
+
+```{r prop tree basics 2}
+tree_full <- left_join(broadgroup, tree_full, by = c("Plot_Code", "Start_Date", "Event_Type_Name"))
+
+tree_full <- tree_full %>%
+  dplyr::mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
+  dplyr::mutate(Genus = as.factor(Genus))
+```
+
+```{r prop tree basics 3}
+tree_full <- tree_full %>%
+  pivot_longer(cols = c(Seedling, Sapling, Tree), 
+               names_to = "Strata", 
+               values_to = "Count")
+tree_full <- tree_full %>%
+  dplyr::mutate(Start_Date = as.Date(Start_Date, format = "%m/%d/%Y")) %>%
+  dplyr::mutate(Genus = as.factor(Genus))
+
+```
+
+```{r prop tree basics 4}
+renderUI({
+  shiny::req(!is.null(tree_full), !is.null(input$prop_year))
+
+ rv$df_treeyr <- tree_full %>%
+          dplyr::filter(lubridate::year(Start_Date) %in% input$prop_year)
+      
+saveRDS(isolate(reactiveValuesToList(input)), paste0("propyr_input.RDS"))
+ saveRDS(isolate(reactiveValuesToList(rv)), paste0("propyr_rv.RDS"))
+
+})
+
+observeEvent(eventExpr = input$button_UpdatePlots, {
+  shiny::req(!is.null(input$Spatial_Scale), !is.null(input$Individual_Unit), !is.null(input$Association), !is.null(rv$df_treeyr), !is.null(tree_full)) # !is.null(tree_full), !is.null(input$prop_year)) #!is.null(rv$df_treeyr)
+
+# input <- list()
+#  input$prop_year <- "2011"
+# input$Spatial_Scale <- "Subunit_Code"
+# input$Individual_Unit <- "BIRT"
+# input$Association <- "Successional Tuliptree Forest (Rich Type)"
+
+# df_tree <- rv$df_treeyr %>%
+  
+prop_species <- tree_full %>% #rv$df_treeyr
+  dplyr::filter(!!as.name(input$Spatial_Scale) == input$Individual_Unit) %>%
+  dplyr::filter(Association_CommonName %in% input$Association) %>%
+  dplyr::group_by(Association_CommonName, Strata, Genus) %>%
+  dplyr::summarize(Sum = sum(Count)) %>%
+  top_n(7, Sum) %>%
+  droplevels(.) %>%
+  ungroup()
+
+ prop_species <- unique(prop_species$Genus) 
+ prop_species <- append(prop_species, factor("Other"))
+
+df_tree <- rv$df_treeyr %>%
+    dplyr::mutate(Plot_Genus = forcats::fct_other(Genus, 
+                                                  keep = prop_species, 
+                                                  other_level = "Other")) %>%
+    dplyr::filter(!!as.name(input$Spatial_Scale) == input$Individual_Unit) %>%
+    dplyr::filter(Association_CommonName %in% input$Association) %>%
+    dplyr::group_by(Association_CommonName, Strata, Plot_Genus) %>%
+    dplyr::summarize(Sum = sum(Count)) %>%
+    ungroup()
+
+rv$df_tree <- df_tree %>%
+  tidyr::pivot_wider(names_from = Plot_Genus, 
+                     values_from = Sum)
+
+color_pallete_function <- colorRampPalette(
+  colors = Okabe_Ito,
+  space = "Lab")
+
+num_colors <- nlevels(df_tree$Plot_Genus)
+okabepalette <- color_pallete_function(num_colors)
+okabepalette <- setNames(okabepalette, levels(df_tree$Plot_Genus))
+okabepalette["Other"] <- "#333333"
+
+page_height = length(unique(df_tree$Association_CommonName)) * 500 + 150
+
+plot_tree <- df_tree %>%
+  ggplot(aes(x = Strata,
+             y = Sum,
+             fill = Plot_Genus)) +
+  geom_bar(width = 0.45, 
+           position = "fill",
+           stat = "identity") +
+  theme_clean() +
+  labs(x = "", y = "") +
+  # geom_text(aes(label = Genus), position = position_fill(vjust = 0.5), color = "#FFFFFF") + # HAS ISSUES
+  scale_fill_manual(values = okabepalette[unique(df_tree$Plot_Genus)],
+                      drop = TRUE) +
+  scale_x_discrete(limits = positions) +
+  facet_wrap(~ Association_CommonName , ncol = 1)
+
+
+x <- length(unique(df_tree$Association_CommonName))
+
+
+  rv$plotly_tree <-
+if (x == 1 ) {
+       ggplotly(plot_tree, height = page_height) %>%
+  layout(margin = list(
+    l = 50,
+  r = 50,
+  b = 100,
+  t = 100,
+  pad = 40),
+  legend = list(orientation = 'h',
+                xanchor = "center",
+                borderwidth = 0.5,
+                x = 0.5,
+                y = -0.2,
+                title = list(font = list(size = 12)),
+                font = list(size = 11)))
+    }
+
+   else {
+       ggplotly(plot_tree, height = page_height) %>%
+  layout(margin = list(
+    l = 50,
+  r = 50,
+  b = 100,
+  t = 100,
+  pad = 40),
+  legend = list(title = list(font = list(size = 12)),
+                font = list(size = 11)))
+  }
+
+})
+
+```
+
+Relative Prop of Species Groups {data-orientation=columns}
+=======================================================================
+
+Inputs {.sidebar data-width=400}
+-------------------------------------
+```{r sidebar input}
+renderUI({
+  shiny::req(!is.null(tree_full))
+
+  selectInput(
+    "prop_year", 
+    label = "Select Year: ", 
+    choices = sort(unique(lubridate::year(tree_full$Start_Date))),
+      # c("All", sort(unique(lubridate::year(tree_full$Start_Date)))), 
+    selected = min(lubridate::year(tree_full$Start_Date))
+      #switch(is.null(input$prop_year)+1, input$prop_year, "ALL")
+)
+
+})
+
+actionButton("button_UpdatePlots", "Update Plots")
+
+selectInput(
+  "Spatial_Scale",
+  label = "Select Spatial Scale: ",
+  choices = c("Network_Code", "Subunit_Code")
+)
+
+
+#selectInput only shows column name when just one value is possible
+renderUI({ #needed bc reactive
+  shiny::req(!is.null(input$Spatial_Scale), !is.null(tree_full))
+  selectInput(
+    "Individual_Unit",
+    label = paste0("Select Individual Unit of ", input$Spatial_Scale, ":" ),
+    choices = unique(tree_full[input$Spatial_Scale])
+  )
+
+})
+
+
+renderUI({
+  shiny::req(!is.null(input$Spatial_Scale), !is.null(input$Individual_Unit), !is.null(rv$df_treeyr))
+
+  communitychoice <- rv$df_treeyr %>%
+    dplyr::filter(!!as.name(input$Spatial_Scale) == input$Individual_Unit) %>%
+    distinct(Association_CommonName) %>%
+    pull(.)
+
+
+  checkboxGroupInput(
+    "Association",
+    label = "Select at least one Community Group",
+    choices = communitychoice
+  )
+
+})
+
+```
+
+
+Column
+-------------------------------------
+
+###
+```{r}
+output$plotly_tree <- renderPlotly({
+  shiny::req(!is.null(rv$plotly_tree))
+  rv$plotly_tree})
+
+plotlyOutput("plotly_tree")
+
+```
+
+###
+```{r}
+output$table_tree <- renderReactable({
+  shiny::req(!is.null(rv$df_tree)) 
+  
+  reactable::reactable(rv$df_tree, 
+                       fullWidth = TRUE,
+                       defaultColDef = colDef(vAlign = "center",
+                                            headerVAlign = "bottom",
+                                            align = "left",
+                                            class = "group",
+                                            headerClass = "header"))
+})
+
+reactableOutput("table_tree")
+```
+
+
