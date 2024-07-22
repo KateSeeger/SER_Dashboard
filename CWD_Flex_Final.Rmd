@@ -1,0 +1,430 @@
+---
+title: "Untitled"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+    theme:  
+          version: 4
+          bootswatch: litera
+runtime: shiny
+
+---
+
+
+```{r}
+###### Most updated working version of the dashboard 
+
+
+########## UPDATES
+#index of cover
+#on cover/constancy page - put range next to cover 0.0 - 0.1 (1)
+#on cover - per habitat group - include number of total plots in the label
+# change table - from index of cover - how many plots
+    ### check with NETN and look for a citation on cover codes
+
+#constancy label = total num plots occupied
+#constancy = number of plots = % plots present/occupied (constancy)
+#within cell, occupancy 75% (n=6)
+
+
+##cwd histograms - ggridge - bin the diameters by 10s, each bar is how many observations are in each bin
+### shift by year
+#page height is determined by number of columns
+
+```
+
+
+```{r include = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+#qaqc list - put in document this dashboard does this to clean the dashboard
+#do the DBH - BA conversion - would need the event table
+#data check page, highlight records with potential problems
+#reactables filter each column
+#tbl_
+#plot_
+#df_
+
+```
+
+```{r setup, include=FALSE}
+
+rm(list=ls())
+### NOTES
+# Converted all tibbles to data frames to get rid of phantom column name errors
+
+### NAMING RULES
+# Functions: FuncTest(dat1_there, dat2_here)
+# Action buttons: button_PushMe
+# User inputs: sel_SelectMe
+# Lists, data frames, vectors, variables...: station_files_list, station_df,  station_vec, here_is_a_variable
+# Data frame cols: df$ColThisOne, df$ColThatOne
+# List elements: list$ElementOne, list$ElementTwo
+# Reactive elements: rv$ThisOne, rv$ThatOne
+# Temporary variables: temp_this_df
+# Well panel id's: wp_FilterParkSite
+
+#options(url.method = "wininet")
+#options(repos="http://cran.revolutionanalytics.com")
+#options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+### Load libraries -----
+# Will automatically install any libraries it can't find
+pkgs <- c("flexdashboard", 
+              "shiny", 
+              "knitr", 
+              "odbc", # pull data from SQL server
+              "leaflet", 
+              "here",
+              "plotly", 
+              "tidyverse", 
+              "plyr", 
+              "sf",
+              "readr",
+              "magrittr",
+              "bslib", 
+              "ggplot2",
+              "patchwork",
+              "leaflet.extras", 
+              "lubridate",
+              "forcats",
+              "httr", # use web services
+              "rgdal", # to use readOGR
+              "sp", # transform projections
+              "purrr", # for applying functions to dplyr groups
+              "dataMaid", # for data checks
+              "shinyFiles", # for user to save files in specified location
+              "RColorBrewer", # to display brewer palettes
+              "shinyjs", # for easy functions that use JavaScript
+              "stringr", # to detect text snippets
+              "reactable",
+              "reactablefmtr",
+              "base", 
+              "htmltools", 
+              "ggthemes",
+              "data.table", # for fast lag calcs
+              "DT", # for interactive tables
+              "cowplot", # to get legends from plots
+              "crosstalk", # for SharedData
+              "gridExtra", # for arranging plots and adding plot annotations (ggplotly can't do captions or subtitles)
+              "RgoogleMaps", # for MaxZoom & MinZoom
+              "leaflet.minicharts") # for pie charts in leaflet maps
+
+
+installed_pkgs <- pkgs %in% installed.packages()
+if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE) 
+lapply(pkgs, library, character.only = TRUE)
+
+invisible(lapply(pkgs, library, character.only = TRUE))
+
+options(shiny.maxRequestSize=60*1024^2) #increase the file upload limit to 90MB.
+
+rv <- reactiveValues(SeedlingSapling = NULL, SpeciesDiversity = NULL, Tree = NULL, CanopyCover = NULL, StandHeight = NULL, Genus = NULL, LatLong = NULL, Species_Cover = NULL, Cover_Class = NULL, Exotics = NULL, CWD = NULL, BroadGroup = NULL, CycleNumber = NULL)
+
+temp_rv <- shiny::reactiveValues(
+  df_rich = NULL, 
+  plotly_tree = NULL, 
+  df_treeplot = NULL, 
+  df_treeyr = NULL,
+  selected_richgroup = NULL, 
+  constancy_final = NULL, 
+  cwd_df = NULL, 
+  cwd_obs = NULL, 
+  cwd_countplot = NULL, 
+  cwd_avgplot = NULL, 
+  df_spcompbar = NULL
+)
+```
+
+```{r data}
+# reading in data -----
+# setwd("C:/Users/kseeger/OneDrive - DOI/Desktop/GIT_RSTUDIO/FLEXDASHBOARD")
+
+# Reading in CSV files
+tree_basics <- read_csv(here::here("Data_In", "TreeBasics_20221013.csv"))
+seedling_sapling <- read_csv(here::here("Data_In", "SeedlingSapling_20221013.csv"))
+cwd <- read_csv(here::here("Data_In","CWD_Basics_20221013.csv"))
+canopy_cover <- read_csv(here::here("Data_In","CanopyCover_20221021.csv"))
+broadgroup <- read_csv(here::here("Data_In", "BroadGroup.csv")) #used to be broadgroup
+species_rich <- read_csv(here::here("Data_In","SpeciesDiversity_LongFormat_20230421.csv")) #waiting on new data from Tim
+stand_height <- read_csv(here::here("Data_In", "CUPN_StandHeight.csv"))
+genus <- read_csv(here::here("Data_In", "CUPN_Genus.csv"))
+cupn_plots <- read_csv(here::here("Data_In", "CUPN_PlotEvents_LatLong.csv"))
+constancy <- read_csv(here::here("Data_In", "CUPN_SpeciesCover.csv"))
+cover_code <- read_csv(here::here("Data_In", "CoverClass.csv"))
+cupn_exotics <- read_csv(here::here("Data_In", "CUPN_HighPriorityExotics.csv"), locale=locale(encoding="latin1"))
+
+```
+
+```{r functions}
+### Functions-----
+
+#rounding function 
+#stick to a certain function naming rule
+round_df <- function(x, digits) {
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x
+}
+
+options(scipen=999)
+
+#keeping only first letter of character
+makeInitials <- function(charVec) {
+  make.unique(vapply(strsplit(toupper(charVec), " "), 
+                     function(x) paste(substr(x, 1, 1), collapse = ""), 
+                     vector("character", 1L)))
+}
+
+
+Okabe_Ito <- c("#E69F00", "#56B4E9", "#009E73", '#CC6677',"#F0E442", "#0072B2", "#D55E00", 
+               "#CC79A7", "#000000",'#DDDDDD', '#EE6678', '#99DDFF', 
+               '#BBCC33', '#332288', '#882255', '#FFAABB')
+
+okabe_ito <- c( "#0072B2", "#D55E00", 
+               "#CC79A7", "#000000",  '#CC6677', '#BBCC33', '#99DDFF', 
+                '#332288', '#882255', '#FFAABB', "#E69F00", "#56B4E9", "#009E73", "#F0E442")
+
+viridis <- c("#fde725", "#5ec962", "#21918c","#3b528b","#440154")
+
+
+makefun <- function(data) {
+  data %>% 
+  dplyr::group_by(Plot_Code, Year) %>%
+  dplyr::summarize(n())
+  
+}
+##### css functions
+integer_columns <- function(maxWidth = 60, ...) {
+  colDef(maxWidth = maxWidth, align = "center",...)
+}
+
+with_tooltip <- function(value, tooltip) {
+  tags$abbr(style = "text-decoration: underline; text-decoration-style: dotted; cursor: help", title = tooltip, value)
+}
+```
+
+```{css styles}
+.border-left {
+  border-left: 14px solid #000;
+  font-size: 12px
+}
+
+.header { 
+  border-bottom-color: #555;
+  border-top-color: #555;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.group {
+  font-size: 12px;
+}
+
+.reactable {
+font-size: 12px; 
+}
+
+.cell {
+  font-size: 12px;
+
+}
+
+.cellitalics {
+  font-style: italic;
+}
+```
+
+```{r}
+genus <- genus %>%
+  dplyr::select(-Space_Index)
+
+tree_basics <- tree_basics %>%
+  dplyr::mutate(Year = lubridate::year(lubridate::mdy(Start_Date))) %>%
+  dplyr::filter(Event_Type_Name != "QA/QC") %>% 
+  left_join(genus) %>%
+  dplyr::mutate(Genus = as.factor(Genus))
+
+seedling_sapling <- seedling_sapling %>%
+  dplyr::mutate(Year = lubridate::year(lubridate::mdy(Start_Date))) %>%
+  dplyr::filter(Event_Type_Name != "QA/QC") %>%
+  left_join(genus) %>%
+   dplyr::mutate(Year = as.factor(Year), 
+                 Genus = as.factor(Genus))
+
+positions <- c("Seedling", "Sapling", "Tree")
+
+broadgroup <- broadgroup %>%
+  dplyr::select(Network_Code, Park_Code, Subunit_Code, Plot_Code, Start_Date, Event_Type_Name, Association_TranslatedName, Association_CommonName, Group_CUPNName)
+
+cover_code <- cover_code %>%
+  dplyr::select(-`Cover Range (%)`)
+
+species_rich <- species_rich %>%
+  dplyr::filter(Event_Type != "QA/QC") %>% #should be event_type_name
+  tidyr::replace_na(list(Nativity = "Unknown")) %>%
+  dplyr::mutate(Start_Date = lubridate::mdy(Start_Date)) 
+
+#--------------
+cwd <- cwd %>%
+  dplyr::filter(Event_Type_Name != "QA/QC")
+
+constancy_full <-  Reduce(function (...) { merge(..., all = TRUE) },  
+                           list(constancy, cover_code, broadgroup, genus))
+constancy_full %<>% 
+  dplyr::filter(Event_Type != "QAQC" | Event_Type != "training")
+```
+
+```{r}
+
+observeEvent(eventExpr = input$button_UpdateCWD, {
+  shiny::req(!is.null(input$cwd_park), !is.null(cwd), !is.null(input$cwd_yr))
+#page height is determined by number of columns
+ 
+  if (input$cwd_yr == "All") {
+  cwd_df <- cwd
+  
+  } else {
+  cwd_df <- cwd %>%
+      dplyr::filter(lubridate::year(lubridate::mdy(Start_Date)) %in% input$cwd_yr)
+    }  
+    
+  
+cwd_count <- cwd_df %>%
+  dplyr::filter(Park_Code == input$cwd_park) %>%
+  dplyr::group_by(Subunit_Code,
+                  Plot_Code, 
+                  Event_Type_Name, 
+                  Start_Date, 
+                  Transect) %>%
+  dplyr::summarize(Obs = n()) %>%
+  ungroup() 
+
+cwd_countplot <- cwd_count %>%
+  ggplot(aes(y = Obs, 
+             x = Event_Type_Name, 
+             fill = Event_Type_Name)) +
+  geom_boxplot() +
+  # theme_hc() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  facet_wrap(.~Plot_Code, nrow = ceiling(length(unique(cwd_count$Plot_Code))/5))  #was 10
+
+
+cwd_avgplot <- cwd_df %>%
+  dplyr::filter(Park_Code == input$cwd_park) %>% 
+  dplyr::group_by(Park_Code,
+                  Subunit_Code,
+                  Plot_Code,
+                  Event_Type_Name, 
+                  Start_Date,
+                  Transect) %>%
+  dplyr::summarize(avg = mean(CWD_Diameter_cm)) %>%
+  ungroup() 
+
+cwd_avgplot <- cwd_avgplot %>%
+  ggplot(aes(y = avg, 
+             fill = Event_Type_Name)) + 
+  geom_boxplot() + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  facet_wrap(.~Plot_Code, nrow = ceiling(length(unique(cwd_count$Plot_Code))/5)) 
+
+page_height = (length(unique(cwd_count$Plot_Code))/5) * 150 + 150
+
+
+ rv$cwd_countplot <- ggplotly(cwd_countplot, 
+                              height = page_height) %>%
+                              layout(margin = list(
+    l = 50,
+  r = 50,
+  b = 100,
+  t = 100,
+  pad = 40))
+
+ rv$cwd_avgplot <- ggplotly(cwd_avgplot, height = page_height) %>%
+   layout(margin = list(
+    l = 50,
+  r = 50,
+  b = 100,
+  t = 100,
+  pad = 40))
+
+saveRDS(isolate(reactiveValuesToList(input)), paste0("cwd_input.RDS"))
+saveRDS(isolate(reactiveValuesToList(rv)), paste0("cwd_rv.RDS"))
+
+# saveRDS(isolate(reactiveValuesToList(input)), paste0("cwdpark_input.RDS"))
+# saveRDS(isolate(reactiveValuesToList(rv)), paste0("cwdpark_rv.RDS"))
+  
+})
+```
+
+CWD Visualizations
+=======================================================================
+### <font style="font-size: 20px"> CWD </font>
+
+*<font size="3"> Testing.* </font>
+*<font size="3"> Testing.* </font>
+*<font size="3"> Testing.* </font>
+
+Inputs {.sidebar data-width=225}
+-------------------------------------
+```{r}
+
+actionButton("button_UpdateCWD", "Update Tables")
+
+selectInput(
+    "cwd_park",
+    label = strong("Select Park: "),
+    choices = sort(unique(cwd$Park_Code)),
+    selected =  "ABLI")
+ 
+# input <- list() 
+# input$cwd_park <- "COWP"
+
+renderUI({
+  shiny::req(!is.null(cwd))
+  
+  year_cwd <- cwd %>%
+    dplyr::filter(Park_Code == input$cwd_park) %>%
+    distinct(lubridate::year(lubridate::mdy(Start_Date)))%>%
+    pull(.)
+  
+  
+  selectInput(
+  "cwd_yr", 
+  label = strong("Select Year: "), 
+  choices = c("All", sort(year_cwd)), 
+  selected = "All"
+)
+
+  })
+
+```
+
+Column {.tabset}
+-------------------------------------
+### CWD Count 
+```{r fig.height =10}
+output$cwd_countplot <- renderPlotly({
+  shiny::req(!is.null(rv$cwd_countplot))
+  
+  rv$cwd_countplot
+  })
+
+plotlyOutput("cwd_countplot")
+
+```
+
+
+### CWD Average
+```{r fig.height =10}
+# output$cwd_avgplot <- renderPlotly({
+#   shiny::req(!is.null(rv$cwd_avgplot))
+#   
+#   rv$cwd_avgplot
+#   })
+# 
+# plotlyOutput("cwd_avgplot")
+```
+
+
