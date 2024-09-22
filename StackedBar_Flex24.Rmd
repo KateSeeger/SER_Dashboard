@@ -1,0 +1,660 @@
+---
+title: "StackedBar_Flex24"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+    theme:  
+          version: 4
+          bootswatch: litera
+runtime: shiny
+
+---
+
+```{r setup, include=FALSE}
+
+rm(list=ls())
+### NOTES
+# Converted all tibbles to data frames to get rid of phantom column name errors
+
+### NAMING RULES
+# Functions: FuncTest(dat1_there, dat2_here)
+# Action buttons: button_PushMe
+# User inputs: sel_SelectMe
+# Lists, data frames, vectors, variables...: station_files_list, station_df,  station_vec, here_is_a_variable
+# Data frame cols: df$ColThisOne, df$ColThatOne
+# List elements: list$ElementOne, list$ElementTwo
+# Reactive elements: rv$ThisOne, rv$ThatOne
+# Temporary variables: temp_this_df
+# Well panel id's: wp_FilterParkSite
+
+#options(url.method = "wininet")
+#options(repos="http://cran.revolutionanalytics.com")
+#options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+### Load libraries -----
+# Will automatically install any libraries it can't find
+pkgs <- c("flexdashboard", 
+              "shiny", 
+              "knitr", 
+              "odbc", # pull data from SQL server
+              "leaflet", 
+              "here",
+              "plotly", 
+              "tidyverse", 
+              "plyr", 
+              "sf",
+              "readr",
+              "magrittr",
+              "bslib", 
+              "ggplot2",
+              "patchwork",
+              "leaflet.extras", 
+              "lubridate",
+              "forcats",
+              "httr", # use web services
+              "rgdal", # to use readOGR
+              "sp", # transform projections
+              "purrr", # for applying functions to dplyr groups
+              "dataMaid", # for data checks
+              "shinyFiles", # for user to save files in specified location
+              "RColorBrewer", # to display brewer palettes
+              "shinyjs", # for easy functions that use JavaScript
+              "stringr", # to detect text snippets
+              "reactable",
+              "reactablefmtr",
+              "base", 
+              "htmltools", 
+              "ggthemes",
+              "data.table", # for fast lag calcs
+              "DT", # for interactive tables
+              "cowplot", # to get legends from plots
+              "crosstalk", # for SharedData
+              "gridExtra", # for arranging plots and adding plot annotations (ggplotly can't do captions or subtitles)
+              "RgoogleMaps", # for MaxZoom & MinZoom
+              "leaflet.minicharts") # for pie charts in leaflet maps
+
+
+installed_pkgs <- pkgs %in% installed.packages()
+if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE, repos='http://cran.us.r-project.org') #repos is new line of code!!!! 
+lapply(pkgs, library, character.only = TRUE)
+
+invisible(lapply(pkgs, library, character.only = TRUE))
+
+options(shiny.maxRequestSize=60*1024^2) #increase the file upload limit to 90MB.
+
+rv <- reactiveValues(SeedlingSapling = NULL, SpeciesDiversity = NULL, Tree = NULL, CanopyCover = NULL, StandHeight = NULL, Genus = NULL, LatLong = NULL, Species_Cover = NULL, Cover_Class = NULL, Exotics = NULL, CWD = NULL, BroadGroup = NULL, CycleNumber = NULL)
+
+
+#### might have to change the reactive value names??? read the shiny
+temp_rv <- shiny::reactiveValues(
+  df_rich = NULL, 
+  plotly_tree = NULL, 
+  df_treeplot = NULL, 
+  df_treeyr = NULL,
+  selected_richgroup = NULL, 
+  constancy_final = NULL, 
+  cwd_df = NULL, 
+  cwd_obs = NULL, 
+  cwd_countplot = NULL, 
+  cwd_avgplot = NULL, 
+  df_spcompbar = NULL, 
+  bc = NULL, 
+  nc = NULL
+)
+```
+
+```{r}
+#reading in csvs
+
+trees <- read_csv(here::here("output", "CUPN_TreeBasics.csv")) #NEWNEW cycle tree basics
+seedlingsapling <- read_csv(here::here("output", "CUPN_SeedlingSapling.csv")) #NEWNEW cycle seedling sapling
+broadgroup <- read_csv(here::here("output", "CUPN_BroadGroup.csv")) #used to be broadgroup
+# species_rich <- read_csv(here::here("Data_In","SpeciesDiversity_LongFormat_20230421.csv")) #waiting on new data from Tim
+genus <- read_csv(here::here("output", "TaxaTable.csv"))
+location <- read_csv(here::here("output", "Location_Table.csv")) #let's just call this LOCATION
+
+```
+
+
+```{r functions}
+### Functions-----
+
+#rounding function 
+#stick to a certain function naming rule
+round_df <- function(x, digits) {
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x
+}
+
+options(scipen=999)
+
+#keeping only first letter of character
+makeInitials <- function(charVec) {
+  make.unique(vapply(strsplit(toupper(charVec), " "), 
+                     function(x) paste(substr(x, 1, 1), collapse = ""), 
+                     vector("character", 1L)))
+}
+
+#color palettes
+Okabe_Ito <- c("#E69F00", "#56B4E9", "#009E73", '#CC6677',"#F0E442", "#0072B2", "#D55E00", 
+               "#CC79A7", "#000000",'#DDDDDD', '#EE6678', '#99DDFF', 
+               '#BBCC33', '#332288', '#882255', '#FFAABB')
+
+okabe_ito <- c( "#0072B2", "#D55E00", 
+               "#CC79A7", "#000000",  '#CC6677', '#BBCC33', '#99DDFF', 
+                '#332288', '#882255', '#FFAABB', "#E69F00", "#56B4E9", "#009E73", "#F0E442")
+
+viridis <- c("#fde725", "#5ec962", "#21918c","#3b528b","#440154")
+
+jane <- c('#a5cee2', '#1f78b4', '#b2df8a', '#e7298b', '#33a02b', '#997dd4', '#000000', '#fc9a99','#e21a1c', '#fdbe6f', '#ff7f00', '#9c9c9c', '#cab2d6', '#6a3d9a', '#feff99', '#b15929')
+
+# function to group by a plot, year and find the count of n
+makefun <- function(data) {
+  data %>% 
+  dplyr::group_by(Plot_Code, Year) %>%
+  dplyr::summarize(n())
+  
+}
+##### css functions
+integer_columns <- function(maxWidth = 60, ...) {
+  colDef(maxWidth = maxWidth, align = "center",...)
+}
+
+with_tooltip <- function(value, tooltip) {
+  tags$abbr(style = "text-decoration: underline; text-decoration-style: dotted; cursor: help", title = tooltip, value)
+}
+
+# lists for organizing column orders
+positions <- c("Tree", "Sapling", "Seedling")
+
+col_group <- c("Plot_Code", "Plant_Code", "Start_Date", "Sample_Year", "Event_ID")
+
+#Neesd to get ride of Network, Park, and Subunit, Change Start_Date to Sample Date?
+common_columns <- c("Network_Code", "Park_Code", "Subunit_Code", "Plot_Code", "Start_Date", "Event_Type_Name", "Year") 
+```
+
+```{r}
+
+############3 9/14/24 something to note is that I probably need to keep in the even_ID to link with location data and sampling date - just a check!!!!!!!!! 
+df_trees <- trees %>%
+  dplyr::mutate(Start_Date = lubridate::mdy_hm(Start_Date), 
+                Start_Date = as.Date(Start_Date), 
+                Sample_Year = as.factor(Sample_Year)) %>%
+  dplyr::filter(Status_Name == "Live Tree") %>%
+  dplyr::mutate(BA_ha = ((pi * DBH^2) /40000)/0.04,
+                Growth_Form = "Tree") 
+
+df_seedsap <- seedlingsapling %>% 
+  dplyr::mutate(Start_Date = lubridate::mdy_hm(Start_Date), 
+                Start_Date = as.Date(Start_Date), 
+                Sample_Year = as.factor(Sample_Year))
+
+  df_sap <- df_seedsap %>%
+    dplyr::select(all_of(col_group), 
+                  Plant_Code,
+                  Sapling_Total) %>%
+    dplyr::group_by(across(all_of(col_group))) %>%
+    dplyr::summarize(Sapling = sum(Sapling_Total))
+  
+  df_seed <- df_seedsap %>%
+    dplyr::select(all_of(col_group), 
+                  Plant_Code, 
+                  Seedling_Total) %>%
+    dplyr::group_by(across(all_of(col_group))) %>%
+    dplyr::summarize(Seedling = sum(Seedling_Total))
+  
+  df_treesp <- df_trees %>%
+    dplyr::group_by(across(all_of(col_group)), Plant_Code) %>%
+    dplyr::summarise(Tree = n())
+  
+    df_treefull <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
+                           list(df_sap,
+                                df_seed,
+                                df_treesp))
+    
+```
+
+
+```{r}
+################## Code below belongs within a reactive ##################
+    
+    # cycle_year <- c("2016", "2017", "2018", "2019", "2020")
+
+    df_broadgroup <- broadgroup %>% #### this is one of the input locations
+      dplyr::filter(Group_A == "Shortleaf Pine - Oak Forest", 
+                    Sample_Year %in% cycle_year) %>%
+      distinct(Plot_Code) %>%
+      pull(.)
+                                    ##### this is another input location to filter down 
+    df_genus <- genus %>%  #### we could iterate over the column names and have that input and the genus column be selected then to left_join to the df_treespfull column
+      # dplyr::filter() %>%
+      dplyr::select(Plant_Code, Genus) #potentially want more? 
+      
+    df_treespfull <- df_treefull %>%
+      dplyr::filter(Plot_Code %in% df_broadgroup,
+                    Sample_Year %in% cycle_year) %>%
+      left_join(df_genus) #%>%
+      
+    df_treespfull <- df_treespfull %>%
+      dplyr::mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
+      pivot_longer(cols = c(Seedling, Sapling, Tree), 
+               names_to = "Strata", 
+               values_to = "Count") # %>%
+     
+      
+      df_treespfull <- df_treespfull %>% 
+        dplyr::group_by(Genus, Strata) %>%
+      # dplyr::group_by(across(all_of(col_group)), Genus) %>%
+        dplyr::summarise(Count = sum(Count)) %>%
+        ungroup()####              # better order for calculating post filtering
+    
+    ls_toptrees <- df_treespfull %>%
+      dplyr::filter(Strata == "Tree", 
+                    Count != "0") %>%
+      dplyr::slice_max(Count, n = 7, with_ties = FALSE) %>%
+      droplevels(.) %>% #hrm eventually useful?
+      ungroup() # hrm probably usefull
+      
+     ls_toptrees <- unique(ls_toptrees[["Genus"]]) #######needs to be in double brackets!!!
+     ls_toptrees <- append(ls_toptrees, "Other") 
+     ls_toptrees <- as.character(ls_toptrees)
+     
+     
+     df_treefiltered <- df_treespfull %>% # rv$df_treeyr %>%
+        dplyr::mutate(species_group_og = forcats::fct_other(Genus, 
+                                                  keep = ls_toptrees, 
+                                                  other_level = "Other")) %>%
+        # dplyr::filter(!!as.name(input$stack_spatialscale) == input$stack_unit) %>%
+        dplyr::group_by(Strata, species_group_og) %>%
+        dplyr::summarize(Sum = sum(Count)) %>%
+        ungroup()
+     
+     plot_treefiltered <- df_treefiltered %>%
+       tidyr::pivot_wider(names_from = species_group_og, 
+                          values_from = Sum)
+
+     color_pallete_function <- colorRampPalette(
+       colors = jane, #Okabe_ito
+       space = "Lab")
+     
+     num_colors <- nlevels(df_treefiltered$species_group_og)
+     janepalette <- color_pallete_function(num_colors)
+     janepalette <- setNames(janepalette, levels(df_treefiltered$species_group_og))
+     janepalette["Other"] <- "#333333"
+     
+     page_height = 550
+    
+     plot_tree <- df_treefiltered %>%
+       ggplot2::ggplot(aes(x = Strata, 
+                           y = Sum, 
+                           fill = species_group_og)) + 
+       geom_bar(width = 0.45, 
+                position = "fill", 
+                stat = "identity") + 
+       theme_clean() + 
+       labs(x = "", y = "Proportion of genera") + 
+       ggtitle("") + #ggtitle(paste0(input$stack_cycle, ": ", input$stack_year, ", ", input$stack_unit, ", ", input$stack_association))
+       theme(plot.title = element_text(lineheight = 3, 
+                                       face = "bold", 
+                                       color = "black", 
+                                       size = 12)) + 
+       scale_fill_manual(values = janepalette[unique(df_treefiltered$species_group_og)],
+                      drop = TRUE) +
+       scale_x_discrete(limits = positions) 
+       
+    
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r NEW CODE naurrrrrrrr}
+# Check notes - Tim change name of Start_Date?
+
+df_trees <- trees %>%
+  dplyr::mutate(Start_Date = lubridate::mdy_hm(Start_Date), 
+                Start_Date = as.Date(Start_Date), 
+                Sample_Year = as.factor(Sample_Year)) 
+
+func_tree <- function(df_trees, strata_group) {
+
+df_trees %>%
+  dplyr::filter(Status_Name == "Live Tree") %>% 
+  # we need to add in a 
+  
+  # col_group is a list of values c(Plot_Code, Start_Date, Year, etc.)
+  # !!as.name is the selected grouping 
+  dplyr::group_by(across(all_of(col_group)), (!!as.name(strata_group))) %>%
+  
+  # how could i group by columns that doesn't exist in the fucking csv
+  dplyr::summarise(Tree = n())
+
+}
+
+func_tree(df_trees, "Plant_Code")
+
+# func_tree <- function(tree_df, strata_group) {
+#   tree_df %>%
+#     dplyr::filter(Status_Code == 1) %>%
+#     dplyr::group_by(across(all_of(col_group)), (!!as.name(strata_group))) %>%
+#     dplyr::summarise(Tree = n())
+# 
+# }
+
+
+
+df_seedsap <- seedlingsapling %>% 
+  dplyr::mutate(Start_Date = lubridate::mdy_hm(Start_Date), 
+                Start_Date = as.Date(Start_Date), 
+                Sample_Year = as.factor(Sample_Year))
+
+
+# func_sap <- function(sap_df, strata_group) {
+
+func_sap <- function(sap_df, strata_group) { # can I make a more interpretable name - Group 1 ?
+  sap_df %>%
+    dplyr::select(all_of(col_group), 
+                  all_of(strata_group), #all_of because of select
+                  Sapling_Total) %>%
+    dplyr::group_by(across(all_of(col_group)), !!as.name(strata_group)) %>%
+    dplyr::summarize(Sapling = sum(Sapling_Total))
+  
+}
+
+func_sap(df_seedsap, "Plant_Code")
+
+# Check if this even works - determine whether I need to somehow append a strata group. Would it be like select this spatial grouping, and select these plots to do the calculations. I'm worried it will require the code to run again and again - taking longer than necessary. 
+# I think the way we've discussed it in the past is that it would be a grab the columns %in% this certain list that was selected from the input, filter the location table and selected the plots - make that into a list and then filter for those <- put into a c() 
+ 
+func_seed <- function(seed_df, strata_group) { 
+  seed_df %>%
+    dplyr::select(all_of(col_group), 
+                  all_of(strata_group), 
+                  Seedling_Total) %>%
+    dplyr::group_by(across(all_of(col_group)), !!as.name(strata_group)) %>%
+    dplyr::summarize(Sapling = sum(Seedling_Total))
+  }
+
+func_seed(df_seedsap, "Plant_Code")
+
+# func_sap <- function(sap_df, strata_group) {
+#   sap_df %>%
+#     dplyr::select(all_of(col_group), 
+#                   all_of(strata_group), #all_of because of select
+#                   Sapling_0_1_DBH,
+#                   Sapling_1_2half_DBH, 
+#                   Sapling_2half_5_DBH,
+#                   Sapling_5_10_DBH) %>%
+#     replace(is.na(.), 0) %>%
+#     dplyr::mutate(SapCount = rowSums(across(where(is.numeric)))) %>%
+#     
+# } 
+
+# no longer need to find row sums of the totals - included in export
+
+# This might be able to stay like this
+df_broadgroup <- broadgroup %>%
+  dplyr::mutate(Start_Date = lubridate::mdy_hm(Start_Date), 
+                Start_Date = as.Date(Start_Date), 
+                Sample_Year = as.factor(Sample_Year)) 
+```
+
+```{r}
+# Step one: Find counts of seedlings, saplings, and trees -
+# In the new data format, seedlings and saplings have already been summed
+# Needs to find trees by genus, first four characters of 
+  tree_barplot <- func_tree(tree_basics, input$stack_spgroup)
+  sapling_barplot <- func_sap(seedling_sapling, input$stack_spgroup)
+  seedling_barplot <- func_seed(seedling_sapling, input$stack_spgroup)
+  
+```
+
+```{r prop tree 1 function}
+# func_tree <- function(tree_df, strata_group) {
+#   tree_df %>%
+#     dplyr::filter(Status_Code == 1) %>%
+#     dplyr::group_by(across(all_of(col_group)), (!!as.name(strata_group))) %>%
+#     dplyr::summarise(Tree = n())
+# 
+# }
+# # func_tree(tree_basics, "Genus")
+# 
+# func_sap <- function(sap_df, strata_group) {
+#   sap_df %>%
+#     dplyr::select(all_of(col_group), 
+#                   all_of(strata_group), #all_of because of select
+#                   Sapling_0_1_DBH,
+#                   Sapling_1_2half_DBH, 
+#                   Sapling_2half_5_DBH,
+#                   Sapling_5_10_DBH) %>%
+#     replace(is.na(.), 0) %>%
+#     dplyr::mutate(SapCount = rowSums(across(where(is.numeric)))) %>%
+#     dplyr::group_by(across(all_of(col_group)), !!as.name(strata_group)) %>%
+#     dplyr::summarize(Sapling = sum(SapCount))
+# }
+# 
+# # func_sap(seedling_sapling, "Genus")
+# 
+# func_seed <- function(seed_df, strata_group) {
+#   seed_df %>%
+#     dplyr::select(all_of(col_group),
+#                   all_of(strata_group), 
+#                   Seedling_15_30_Tall,
+#                   Seedling_5_15_Tall, 
+#                   Seedling_30_50_Tall,
+#                   Seedling_50_137_Tall) %>%
+#     replace(is.na(.), 0) %>%
+#     dplyr::mutate(SeedCount = rowSums(across(where(is.numeric)))) %>%
+#     dplyr::group_by(across(all_of(col_group)), !!as.name(strata_group)) %>%
+#     dplyr::summarize(Seedling = sum(SeedCount))
+#                   
+# }
+# # View(func_seed(seedling_sapling, "Genus"))
+```
+
+```{r prop tree 2}
+# input <- list()
+# input$stack_spatialscale <- "Subunit_Code"
+# input$stack_unit <- "BIRT"
+# input$stack_year <- "2011"
+# input$stack_association <- "Successional Tuliptree Forest (Rich Type)"
+# input$stack_spgroup <- "Genus"
+# input$stack_cycle <- "Year"
+# input$stack_habitatgroup <- "Association_CommonName"
+
+observeEvent(eventExpr = input$button_UpdatePlots, {
+  
+  cat("Line0")
+
+ shiny::req(!is.null(input$stack_spatialscale), !is.null(input$stack_unit), !is.null(input$stack_association), !is.null(tree_basics), !is.null(input$stack_year), !is.null(input$stack_spgroup), !is.null(input$stack_cycle), !is.null(input$stack_habitatgroup))
+  
+  cat("Line1")
+  withProgress(message = "Just a moment", detail = "Generating stacked bar chart...", value = 0, {
+  
+  species_group <- input$stack_spgroup 
+  species_group_name <- input$stack_spgroup
+  habitat_group <- input$stack_habitatgroup
+  
+  tree_barplot <- func_tree(tree_basics, input$stack_spgroup)
+  sapling_barplot <- func_sap(seedling_sapling, input$stack_spgroup)
+  seedling_barplot <- func_seed(seedling_sapling, input$stack_spgroup)
+  
+  tree_full <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
+                           list(seedling_barplot,
+                                sapling_barplot,
+                                tree_barplot))
+
+  tree_full <- left_join(tree_full, broadgroup, by = c("Plot_Code","Event_Type_Name", "Start_Date", "Year")) %>%
+    dplyr::mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
+    pivot_longer(cols = c(Seedling, Sapling, Tree), 
+               names_to = "Strata", 
+               values_to = "Count") 
+  
+rv$df_treeyr <-  #rv$df_treeyr
+  if  (input$stack_cycle == "Year") {
+    
+  tree_full %>%
+    dplyr::filter(Year %in% input$stack_year)
+  
+  } else { # could maybe just be an else statement
+   
+  stack_cycle <- tree_basics %>%
+    dplyr::select(Start_Date, Plot_Code, Cycle) %>%
+    distinct()
+      
+  df_woody <- left_join(tree_full, stack_cycle, by = c("Plot_Code", "Start_Date"))
+    
+  df_woody %>% 
+    dplyr::filter(Cycle == input$stack_year) }
+
+cat("Line2")
+
+
+  if (input$stack_association == "All") {
+      nplot <- rv$df_treeyr %>% # rv$df_treeyr %>% 
+        dplyr::filter(!!as.name(input$stack_spatialscale) == input$stack_unit) %>%
+        distinct(Plot_Code)
+        
+      # prop_species <- tree_full %>%
+      prop_species <- tree_barplot %>%
+        dplyr::filter(!!as.name(input$stack_spatialscale) == input$stack_unit) %>%
+        dplyr::group_by(Strata, !!as.name(species_group)) %>%
+        dplyr::summarize(Sum = sum(Count)) %>%
+        top_n(7, Sum) %>%
+        droplevels(.) %>%
+        ungroup()
+      
+      prop_species <- unique(prop_species[[species_group]]) #######needs to be in double brackets!!!
+      prop_species <- append(prop_species, "Other")
+      prop_species <- as.character(prop_species) #might be redundant at this point
+      
+      
+      df_tree <- rv$df_treeyr %>% # rv$df_treeyr %>%
+        dplyr::mutate(species_group_og = forcats::fct_other(rv$df_treeyr[[species_group]], 
+                                                  keep = prop_species, 
+                                                  other_level = "Other")) %>%
+        dplyr::filter(!!as.name(input$stack_spatialscale) == input$stack_unit) %>%
+        dplyr::group_by(Strata, species_group_og) %>%
+        dplyr::summarize(Sum = sum(Count)) %>%
+        ungroup()
+      
+  } else {
+
+cat("Line3")
+    
+nplot <- rv$df_treeyr %>% # rv$df_treeyr %>%
+   dplyr::filter(!!as.name(input$stack_spatialscale) == input$stack_unit) %>%
+   dplyr::filter(!!as.name(habitat_group) %in% input$stack_association) %>%
+   distinct(Plot_Code)
+  
+    
+ prop_species <- tree_full %>%
+  dplyr::filter(!!as.name(input$stack_spatialscale) == input$stack_unit) %>%
+  dplyr::filter(!!as.name(habitat_group) %in% input$stack_association) %>%
+  dplyr::group_by(!!as.name(habitat_group), Strata, !!as.name(species_group)) %>%
+  dplyr::summarize(Sum = sum(Count)) %>%
+  top_n(7, Sum) %>%
+  droplevels(.) %>%
+  ungroup()
+
+ prop_species <- unique(prop_species[[species_group]]) 
+ prop_species <- append(prop_species, "Other")
+ prop_species <- as.character(prop_species)
+
+df_tree <- rv$df_treeyr %>% #  rv$df_treeyr %>%
+    dplyr::mutate(species_group_og = forcats::fct_other(rv$df_treeyr[[species_group]], 
+                                                  keep = prop_species, 
+                                                  other_level = "Other")) %>%
+    dplyr::filter(!!as.name(input$stack_spatialscale) == input$stack_unit) %>%
+    dplyr::filter(!!as.name(habitat_group) %in% input$stack_association) %>%
+    dplyr::group_by(!!as.name(habitat_group), Strata, species_group_og) %>%
+    dplyr::summarize(Sum = sum(Count)) %>%
+    ungroup()
+  }
+
+cat("Line4")
+
+rv$df_tree <- df_tree %>% # rv$df_treeyr <- df_tree # 
+  tidyr::pivot_wider(names_from = species_group_og, 
+                     values_from = Sum)
+
+color_pallete_function <- colorRampPalette(
+  colors = jane, #Okabe_ito
+  space = "Lab")
+
+num_colors <- nlevels(df_tree$species_group_og)
+janepalette <- color_pallete_function(num_colors)
+janepalette <- setNames(janepalette, levels(df_tree$species_group_og))
+janepalette["Other"] <- "#333333"
+
+page_height = 550
+
+# npage <- sum(count(p)$freq))
+
+cat("Line5")
+
+plot_tree <- df_tree %>%
+  ggplot(aes(x = Strata,
+             y = Sum,
+             fill = species_group_og)) +
+  geom_bar(width = 0.45, 
+           position = "fill",
+           stat = "identity") +
+  theme_clean() +
+  labs(x = "", y = "Proportion of genera") + 
+  ggtitle(paste0(input$stack_cycle, ": ", input$stack_year, ", ", input$stack_unit, ", ", input$stack_association)) + theme(plot.title = element_text(lineheight=3, face="bold", color="black", size=12)) +
+  # geom_text(aes(label = Genus), position = position_fill(vjust = 0.5), color = "#FFFFFF") + # HAS ISSUES
+  scale_fill_manual(values = janepalette[unique(df_tree$species_group_og)],
+                      drop = TRUE) +
+  scale_x_discrete(limits = positions) 
+
+cat("Line6")
+
+  rv$plotly_tree <-
+ # if (x == 1 ) {
+       ggplotly(plot_tree, height = page_height) %>% #, height = page_height
+  layout(margin = list(
+    l = 50,
+  r = 50,
+  b = 100,
+  t = 100,
+  pad = 40),
+  legend = list(orientation = 'h',
+                xanchor = "center",
+                borderwidth = 0.5,
+                x = 0.5,
+                y = -0.2,
+                title = "",
+                # title = list(font = list(size = 12)),
+                font = list(size = 11)),
+  annotations = list(text = paste0("Number of Surveyed Plots:", sum(count(nplot)$freq), "<br>Total densities of genera in all plots of the selected subunit-community group <br> (seedlings and saplings summed at 1 and 10 m2 quadrats; <br> trees summed at the 400m2 plot level)"), #added comma
+                     font = list(size = 12), 
+                     showarrow = FALSE,
+                            xref = 'paper', x = 1.02,
+                            yref = 'paper', y = 1.3)
+  )
+  
+  
+# saveRDS(isolate(reactiveValuesToList(input)), paste0("stackplot_input.RDS"))
+# saveRDS(isolate(reactiveValuesToList(rv)), paste0("stackplot_rv.RDS"))
+  })
+ })
+
+
+```
+
+
+
