@@ -113,7 +113,8 @@ broadgroup <- read_csv(here::here("output", "CUPN_BroadGroup.csv")) #used to be 
 # species_rich <- read_csv(here::here("Data_In","SpeciesDiversity_LongFormat_20230421.csv")) #waiting on new data from Tim
 genus <- read_csv(here::here("output", "TaxaTable.csv"))
 location <- read_csv(here::here("output", "Location_Table.csv")) #let's just call this LOCATION
-
+genus_group <- read_csv(here::here("output", "Genus_grouping.csv"))
+events <- read_csv(here::here("output", "CUPN_EventTable2.csv"))
 ```
 
 
@@ -176,22 +177,131 @@ common_columns <- c("Network_Code", "Park_Code", "Subunit_Code", "Plot_Code", "S
 ```
 
 ```{r}
+func_processdata <- function(df, growth_form) {
+  df %>%
+    dplyr::mutate(Start_Date = as.Date(lubridate::mdy_hm(Start_Date)),
+                  Sample_Year = as.factor(Sample_Year),
+                  Growth_Form = growth_form)
+}
 
-############3 9/14/24 something to note is that I probably need to keep in the even_ID to link with location data and sampling date - just a check!!!!!!!!! 
-df_trees <- trees %>%
-  dplyr::mutate(Start_Date = lubridate::mdy_hm(Start_Date), 
-                Start_Date = as.Date(Start_Date), 
-                Sample_Year = as.factor(Sample_Year)) %>%
+df_genus <- genus %>% 
+  dplyr::select(Plant_Code, Genus) 
+
+df_events <- func_processdata(events, NA)
+
+df_events %<>%
+  dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4))
+
+df_trees <- func_processdata(trees, "Tree") %>%
   dplyr::filter(Status_Name == "Live Tree") %>%
-  dplyr::mutate(BA_ha = ((pi * DBH^2) /40000)/0.04,
-                Growth_Form = "Tree") 
+  dplyr::mutate(BA_ha = ((pi * DBH^2) / 40000) / 0.04)          # df_trees and df_seedsap are slaying
 
-df_seedsap <- seedlingsapling %>% 
-  dplyr::mutate(Start_Date = lubridate::mdy_hm(Start_Date), 
-                Start_Date = as.Date(Start_Date), 
-                Sample_Year = as.factor(Sample_Year))
+df_seedsap <- func_processdata(seedlingsapling, NA)
 
-  df_sap <- df_seedsap %>%
+ # new code for woody map _flex24
+location %<>%
+    dplyr::select(Park_Code, Subunit_Code, Plot_Code, Latitude, Longitude)
+
+genus_grouping <-  if (!exists("genus_group")) {
+  genus_grouping <- NULL
+  } else { 
+  genus_grouping <- genus_group
+  }
+
+```
+
+```{r does stacked bar plot need this? Does it call to any of it?}
+df_treedivsum <- df_trees %>% #----------Summing basal area per growth form, year, plot, and subunit 
+  dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Growth_Form) %>%
+  dplyr::summarise(Sum = sum(BA_ha)) %>%
+  tidyr::pivot_longer(cols = Sum, 
+                      names_to = "Plant_Code", 
+                      values_to = "Count")
+  # tidyr::pivot_longer(cols = Sum, 
+  #                     names_to = "Genus", 
+  #                     values_to = "Count")   old code when GENUS was still included in the input data
+  # is there a better way? Should we keep df_treediv and df_treedivsum separate?
+
+df_treediv <- df_trees %>% #----------finding raw count of live trees per growth form, year, plot, and subunit - are we not taking genus into account?? just raw numbers?? for us just plant_code which DOOESSS reduce the amount of observatiosn not as much as if by genus hmmmmmmmmmmmmmmmm
+  dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Plant_Code, Growth_Form) %>%
+  dplyr::summarize(Count = n()) %>%
+  ungroup() %>%
+  full_join(df_treedivsum)
+
+
+
+func_seedsap <- function(df, form_col, total_col) {
+  df %>%
+    replace(is.na(.), 0) %>%
+    dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Plant_Code, Growth_Form = form_col) %>%
+    dplyr::summarise(Count = sum({{total_col}}, na.rm = TRUE)) %>%
+    ungroup()
+}
+
+df_mapsapdiv <- func_seedsap(df_seedsap %>% dplyr::mutate(Growth_Form = "Sapling"), "Sapling", Sapling_Total)
+
+df_mapsapsum <- df_seedsap %>%
+  dplyr::mutate(
+    Growth_Form = "Sapling",
+    Sapling01_BA =  (0.00007854 * (0.5)^2 ) * Sapling_0_1_DBH,
+    Sapling12h_BA = (0.00007854 * (1.75)^2 ) * Sapling_1_2half_DBH,
+    Sapling2h5_BA = (0.00007854 * (3.25)^2 ) * Sapling_2half_5_DBH ,
+    Sapling510_BA = (0.00007854 * (7.5)^2 ) * Sapling_5_10_DBH
+  ) %>%
+  dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Growth_Form) %>%
+  dplyr::summarise(
+    Sum = sum(Sapling01_BA, Sapling12h_BA, Sapling2h5_BA, Sapling510_BA, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  tidyr::pivot_longer(
+    cols = Sum,
+    names_to = "Plant_Code",
+    values_to = "Count"
+  )
+
+df_sapdiv <- dplyr::full_join(df_mapsapdiv, df_mapsapsum) #-------joining count and basal area calculations for saplings
+
+df_mapseeddiv <- func_seedsap(df_seedsap %>% dplyr::mutate(Growth_Form = "Seedling"), "Seedling", Seedling_Total)
+
+df_mapseedsum <- df_mapsapsum %>%
+  dplyr::mutate(Growth_Form = "Seedling", 
+                Count = 50) # so much easier lol
+
+df_seeddiv <- dplyr::full_join(df_mapseeddiv, df_mapseedsum) 
+
+
+df_spdiv <-  Reduce(function (...) { merge(..., all = TRUE) },  #full join idk why I can't just do a regular left join....
+                        list(df_treediv, df_sapdiv, df_seeddiv))
+#### end of code within the flexdashboard
+
+genus_grouping <-  if (!exists("genus_group")) {
+  genus_grouping <- NULL
+  } else { 
+  genus_grouping <- genus_group
+  }
+
+
+```
+
+```{r not needed,matches the inputs from woody map}
+############3 9/14/24 something to note is that I probably need to keep in the even_ID to link with location data and sampling date - just a check!!!!!!!!! 
+# df_trees1 <- trees %>%
+#   dplyr::mutate(Start_Date = lubridate::mdy_hm(Start_Date),
+#                 Start_Date = as.Date(Start_Date),
+#                 Sample_Year = as.factor(Sample_Year)) %>%
+#   dplyr::filter(Status_Name == "Live Tree") %>%
+#   dplyr::mutate(BA_ha = ((pi * DBH^2) /40000)/0.04,
+#                 Growth_Form = "Tree")
+# 
+# df_seedsap2 <- seedlingsapling %>%
+#   dplyr::mutate(Start_Date = lubridate::mdy_hm(Start_Date),
+#                 Start_Date = as.Date(Start_Date),
+#                 Sample_Year = as.factor(Sample_Year))
+```
+
+
+```{r}
+df_sap <- df_seedsap %>%
     dplyr::select(all_of(col_group), 
                   Plant_Code,
                   Sapling_Total) %>%
@@ -214,35 +324,209 @@ df_seedsap <- seedlingsapling %>%
                                 df_seed,
                                 df_treesp))
     
+    df_treefull %<>%
+      tidyr::pivot_longer(cols = c(Seedling, Sapling, Tree), 
+               names_to = "Strata", 
+               values_to = "Count")
+```
+
+```{r}
+all_events <- events %>%
+  left_join(broadgroup) %>%
+  dplyr::filter(Event_Type != "QA/QC")%>% 
+  left_join(location %>% dplyr::select(Park_Code, Subunit_Code, Plot_Code), by = "Plot_Code")
+
 ```
 
 
 ```{r}
+# input <- list()
+# input$stack_spatialunit <- "Subunit_Code"
+# input$stack_userunit <- "BIRT"
+# input$stack_season <- "Sample_Year"
+# input$stack_year <- "2011"
+# input$stack_spatialhabitat <- "Group_B_Common_Name"
+# input$stack_userhabitat <- "Successional Tuliptree Forest (Rich Type)"
+# input$stack_spgroup <- "Plant_Code" # options are Genus and plant code
+# input$stack_usergroup <- "Group22" #group x, y, z
+
+
+#this code is selecting for the spatial scale, for plotting bar chats we can either look at everything across the entire plot, ORRRR  we can look within a park/subunit and select for the smaller grouping
+ if (input$stack_spatialhabitat == "All" & input$stack_userhabitat == "All") {
+   nplot <- all_events %>%
+     dplyr::filter(!!as.name(input$stack_spatialunit) == input$stack_userunit) %>%
+     distinct(!!as.name(input$stack_season), Plot_Code, Event_ID)
+  
+
+ } else {
+   nplot <- all_events %>%
+     dplyr::filter(!!as.name(input$stack_spatialunit) == input$stack_userunit) %>%
+     dplyr::filter(!!as.name(input$stack_spatialhabitat) == input$stack_userhabitat) %>%
+     distinct(!!as.name(input$stack_season), Plot_Code, Event_ID)
+ } 
+
+stack_sequence <- nplot %>%
+  dplyr::filter(!!as.name(input$stack_season) == input$stack_year) %>%
+  pull(Event_ID)
+
+
+#this code is selecting for if there is a different type of SPECIES GROUPING that we want either GENUS (top 8) or by another grouping based on species and a higher group
+
+# woodystacktop_species <- 
+if (input$stack_spgroup == "Genus" & input$stack_usergroup == "Genus") {
+
+df_stacktop <- df_treefull %>%
+  dplyr::filter(Event_ID %in% stack_sequence, 
+                Strata == "Tree") %>%
+  left_join(df_genus) %>%
+  dplyr::group_by(!!as.name(input$stack_spgroup)) %>%     #either group by plant code or by a group of selected genuses????
+  dplyr::summarize(tree_obs = n()) %>%
+  ungroup() %>%
+  top_n(7, tree_obs) %>%
+  droplevels(.)
+
+woodystacktop_species <- df_stacktop %>%
+                        distinct(!!as.name(input$stack_spgroup)) %>%  # use !!as.name to refer to the column
+                        pull(.)
+
+woodystacktop_species <- as.character(c(as.character(woodystacktop_species), "Other"))
+
+  } else {
+    # input$stack_spgroup <- "Plant_Code" testing to make sure plant_code acutally works
+    genus_group <- genus_grouping 
+    # %>%
+      # select(!!as.name(input$stack_spgroup), everything()) ### I actually think this doesn't do anything
+
+    woodystacktop_species <- unique(genus_group[[input$stack_spgroup]])
+
+    woodystacktop_species <- as.character(c(as.character(woodystacktop_species), "Other"))
+
+    df_treefull %<>%
+      full_join(genus_grouping) %>%
+      dplyr::select(-Genus)
+
+  }
+
+
+s <- df_treefull %>%
+  dplyr::filter(Event_ID %in% stack_sequence) %>%
+  left_join(df_genus) %>%
+  dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4),
+                Plant_Code = as.factor(Plant_Code)) %>%
+  dplyr::mutate(Plot_Genus = forcats::fct_other(.[[input$stack_spgroup]], #works for genus genus and genus group
+                                                   keep = woodystacktop_species, ### this could be an input
+                                                   other_level = 'Other')) %>%
+  dplyr::mutate(Plot_Genus = as.factor(Plot_Genus)) %>% 
+  dplyr::mutate(!!as.name(input$stack_usergroup) := case_when(
+    Plot_Genus == "Other" ~ "Other", 
+    TRUE ~ .[[input$stack_usergroup]])) %>%
+  dplyr::group_by(Sample_Year, Strata,
+                  !!as.name(input$stack_usergroup)) %>%
+  dplyr::summarise(Count = sum(Count)) %>%
+  ungroup() 
+
+stack_expan <- spdiv %>%
+  dplyr::select(Subunit_Code, Event_ID, Plot_Code, Sample_Year, Growth_Form) %>%
+  distinct() %>%
+  dplyr::mutate(
+    # Dynamically create a column based on input$map_usergroup
+    !! input$map_usergroup := "Other",  
+    Count = 0  # Add 'Count' column with value 0
+  )
+
+
+
+########### Woody MAp example
+spdiv <- df_spdiv %>%
+  left_join(df_genus, by = "Plant_Code") %>%
+  dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4),
+                Plant_Code = as.factor(Plant_Code)) %>%
+  dplyr::mutate(Plot_Genus = forcats::fct_other(.[[input$map_spgroup]], #works for genus genus and genus group
+                                                   keep = woodymptop_species, ### this could be an input
+                                                   other_level = 'Other')) %>%
+  dplyr::mutate(Plot_Genus = as.character(Plot_Genus)) %>%
+  dplyr::mutate(Genus = case_when(
+    Plant_Code == "Sum" ~ "Sum",
+    TRUE ~ Genus)) %>%
+  dplyr::mutate(Plot_Genus = case_when(
+    Plant_Code == "Sum" ~ "Sum",
+    TRUE ~ Plot_Genus)
+  ) %>%
+  dplyr::mutate(Plot_Genus = as.factor(Plot_Genus)) %>% 
+  dplyr::mutate(!!as.name(input$map_usergroup) := case_when(
+    Plot_Genus == "Sum" ~ "Sum", 
+    Plot_Genus == "Other" ~ "Other", 
+    TRUE ~ .[[input$map_usergroup]])) %>%
+  dplyr::group_by(Subunit_Code, Event_ID, Plot_Code, Sample_Year, Growth_Form, #Plot_Genus,
+                  !!as.name(input$map_usergroup)) %>%
+  dplyr::summarise(Count = sum(Count)) %>%
+  ungroup() 
+
+stack_expan <- spdiv %>%
+  dplyr::select(Subunit_Code, Event_ID, Plot_Code, Sample_Year, Growth_Form) %>%
+  distinct() %>%
+  dplyr::mutate(
+    # Dynamically create a column based on input$map_usergroup
+    !! input$map_usergroup := "Other",  
+    Count = 0  # Add 'Count' column with value 0
+  )
+
+spdiv %<>%
+  full_join(mp_expan) %>%
+  dplyr::group_by(Subunit_Code, Event_ID, Plot_Code, Sample_Year, Growth_Form, #Plot_Genus,
+                  !!as.name(input$map_usergroup)) %>%
+  dplyr::summarise(Count = sum(Count)) %>%
+  ungroup() 
+  
+  
+############
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+
+   
+    # prop_species <- df_treefull %>%
+    #     dplyr::filter(!!as.name(input$stack_spatialscale) == input$stack_unit, 
+    #                   Strata == "Tree") %>% # this is a new line of code looking at most abundant tree species ### there might be associated errors with this
+    #     dplyr::group_by(Strata, !!as.name(species_group)) %>%
+    #     dplyr::summarize(Sum = sum(Count)) %>%
+    #     top_n(7, Sum) %>%
+    #     droplevels(.) %>%
+    #     ungroup()
+    
+
+   
 ################## Code below belongs within a reactive ##################
     
-    # cycle_year <- c("2016", "2017", "2018", "2019", "2020")
 
-    df_broadgroup <- broadgroup %>% #### this is one of the input locations
-      dplyr::filter(Group_A == "Shortleaf Pine - Oak Forest", 
-                    Sample_Year %in% cycle_year) %>%
-      distinct(Plot_Code) %>%
-      pull(.)
-                                    ##### this is another input location to filter down 
-    df_genus <- genus %>%  #### we could iterate over the column names and have that input and the genus column be selected then to left_join to the df_treespfull column
-      # dplyr::filter() %>%
-      dplyr::select(Plant_Code, Genus) #potentially want more? 
+# WE ARE PULLING FROM ALL_EVENTS - SELECTING AND FILTERING PLOTS FROM THERE AND ALLOWING A SELECTION OF EVENT_IDS
+    # df_broadgroup <- broadgroup %>% #### this is one of the input locations
+    #   dplyr::filter(Group_A == "Shortleaf Pine - Oak Forest", 
+    #                 Sample_Year %in% cycle_year) %>%
+    #   distinct(Plot_Code) %>%
+    #   pull(.)
+    
+
       
-    df_treespfull <- df_treefull %>%
-      dplyr::filter(Plot_Code %in% df_broadgroup,
-                    Sample_Year %in% cycle_year) %>%
-      left_join(df_genus) #%>%
+  #%>%
       
-    df_treespfull <- df_treespfull %>%
-      dplyr::mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
-      pivot_longer(cols = c(Seedling, Sapling, Tree), 
-               names_to = "Strata", 
-               values_to = "Count") # %>%
-     
+    # df_treespfull <- df_treespfull %>%
+    #   dplyr::mutate_if(is.numeric, ~replace(., is.na(.), 0)) %>%
+    #   pivot_longer(cols = c(Seedling, Sapling, Tree), 
+    #            names_to = "Strata", 
+    #            values_to = "Count") # %>%
+    #  
       
       df_treespfull <- df_treespfull %>% 
         dplyr::group_by(Genus, Strata) %>%
@@ -311,159 +595,6 @@ df_seedsap <- seedlingsapling %>%
 
 
 
-
-
-
-
-
-
-
-
-
-
-```{r NEW CODE naurrrrrrrr}
-# Check notes - Tim change name of Start_Date?
-
-df_trees <- trees %>%
-  dplyr::mutate(Start_Date = lubridate::mdy_hm(Start_Date), 
-                Start_Date = as.Date(Start_Date), 
-                Sample_Year = as.factor(Sample_Year)) 
-
-func_tree <- function(df_trees, strata_group) {
-
-df_trees %>%
-  dplyr::filter(Status_Name == "Live Tree") %>% 
-  # we need to add in a 
-  
-  # col_group is a list of values c(Plot_Code, Start_Date, Year, etc.)
-  # !!as.name is the selected grouping 
-  dplyr::group_by(across(all_of(col_group)), (!!as.name(strata_group))) %>%
-  
-  # how could i group by columns that doesn't exist in the fucking csv
-  dplyr::summarise(Tree = n())
-
-}
-
-func_tree(df_trees, "Plant_Code")
-
-# func_tree <- function(tree_df, strata_group) {
-#   tree_df %>%
-#     dplyr::filter(Status_Code == 1) %>%
-#     dplyr::group_by(across(all_of(col_group)), (!!as.name(strata_group))) %>%
-#     dplyr::summarise(Tree = n())
-# 
-# }
-
-
-
-df_seedsap <- seedlingsapling %>% 
-  dplyr::mutate(Start_Date = lubridate::mdy_hm(Start_Date), 
-                Start_Date = as.Date(Start_Date), 
-                Sample_Year = as.factor(Sample_Year))
-
-
-# func_sap <- function(sap_df, strata_group) {
-
-func_sap <- function(sap_df, strata_group) { # can I make a more interpretable name - Group 1 ?
-  sap_df %>%
-    dplyr::select(all_of(col_group), 
-                  all_of(strata_group), #all_of because of select
-                  Sapling_Total) %>%
-    dplyr::group_by(across(all_of(col_group)), !!as.name(strata_group)) %>%
-    dplyr::summarize(Sapling = sum(Sapling_Total))
-  
-}
-
-func_sap(df_seedsap, "Plant_Code")
-
-# Check if this even works - determine whether I need to somehow append a strata group. Would it be like select this spatial grouping, and select these plots to do the calculations. I'm worried it will require the code to run again and again - taking longer than necessary. 
-# I think the way we've discussed it in the past is that it would be a grab the columns %in% this certain list that was selected from the input, filter the location table and selected the plots - make that into a list and then filter for those <- put into a c() 
- 
-func_seed <- function(seed_df, strata_group) { 
-  seed_df %>%
-    dplyr::select(all_of(col_group), 
-                  all_of(strata_group), 
-                  Seedling_Total) %>%
-    dplyr::group_by(across(all_of(col_group)), !!as.name(strata_group)) %>%
-    dplyr::summarize(Sapling = sum(Seedling_Total))
-  }
-
-func_seed(df_seedsap, "Plant_Code")
-
-# func_sap <- function(sap_df, strata_group) {
-#   sap_df %>%
-#     dplyr::select(all_of(col_group), 
-#                   all_of(strata_group), #all_of because of select
-#                   Sapling_0_1_DBH,
-#                   Sapling_1_2half_DBH, 
-#                   Sapling_2half_5_DBH,
-#                   Sapling_5_10_DBH) %>%
-#     replace(is.na(.), 0) %>%
-#     dplyr::mutate(SapCount = rowSums(across(where(is.numeric)))) %>%
-#     
-# } 
-
-# no longer need to find row sums of the totals - included in export
-
-# This might be able to stay like this
-df_broadgroup <- broadgroup %>%
-  dplyr::mutate(Start_Date = lubridate::mdy_hm(Start_Date), 
-                Start_Date = as.Date(Start_Date), 
-                Sample_Year = as.factor(Sample_Year)) 
-```
-
-```{r}
-# Step one: Find counts of seedlings, saplings, and trees -
-# In the new data format, seedlings and saplings have already been summed
-# Needs to find trees by genus, first four characters of 
-  tree_barplot <- func_tree(tree_basics, input$stack_spgroup)
-  sapling_barplot <- func_sap(seedling_sapling, input$stack_spgroup)
-  seedling_barplot <- func_seed(seedling_sapling, input$stack_spgroup)
-  
-```
-
-```{r prop tree 1 function}
-# func_tree <- function(tree_df, strata_group) {
-#   tree_df %>%
-#     dplyr::filter(Status_Code == 1) %>%
-#     dplyr::group_by(across(all_of(col_group)), (!!as.name(strata_group))) %>%
-#     dplyr::summarise(Tree = n())
-# 
-# }
-# # func_tree(tree_basics, "Genus")
-# 
-# func_sap <- function(sap_df, strata_group) {
-#   sap_df %>%
-#     dplyr::select(all_of(col_group), 
-#                   all_of(strata_group), #all_of because of select
-#                   Sapling_0_1_DBH,
-#                   Sapling_1_2half_DBH, 
-#                   Sapling_2half_5_DBH,
-#                   Sapling_5_10_DBH) %>%
-#     replace(is.na(.), 0) %>%
-#     dplyr::mutate(SapCount = rowSums(across(where(is.numeric)))) %>%
-#     dplyr::group_by(across(all_of(col_group)), !!as.name(strata_group)) %>%
-#     dplyr::summarize(Sapling = sum(SapCount))
-# }
-# 
-# # func_sap(seedling_sapling, "Genus")
-# 
-# func_seed <- function(seed_df, strata_group) {
-#   seed_df %>%
-#     dplyr::select(all_of(col_group),
-#                   all_of(strata_group), 
-#                   Seedling_15_30_Tall,
-#                   Seedling_5_15_Tall, 
-#                   Seedling_30_50_Tall,
-#                   Seedling_50_137_Tall) %>%
-#     replace(is.na(.), 0) %>%
-#     dplyr::mutate(SeedCount = rowSums(across(where(is.numeric)))) %>%
-#     dplyr::group_by(across(all_of(col_group)), !!as.name(strata_group)) %>%
-#     dplyr::summarize(Seedling = sum(SeedCount))
-#                   
-# }
-# # View(func_seed(seedling_sapling, "Genus"))
-```
 
 ```{r prop tree 2}
 # input <- list()
