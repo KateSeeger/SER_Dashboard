@@ -170,6 +170,15 @@ df_events <- func_processdata(events, NA)
 df_events %<>%
   dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4))
 
+#####TRY THIS!!!############
+# all_events <- df_events%>%
+#   left_join(broadgroup) %>%
+#   dplyr::filter(Event_Type != "QA/QC")%>% 
+#   left_join(location %>% dplyr::select(Network_Code, Park_Code, Subunit_Code, Plot_Code), by = "Plot_Code") 
+
+#####TRY THIS!!!############
+
+
 df_trees <- func_processdata(trees, "Tree") %>%
   dplyr::filter(Status_Name == "Live Tree") %>%
   dplyr::mutate(BA_ha = ((pi * DBH^2) / 40000) / 0.04)
@@ -342,7 +351,7 @@ spdiv <- df_spdiv %>%
     TRUE ~ .[[input$map_usergroup]])) %>%
   dplyr::group_by(Subunit_Code, Event_ID, Plot_Code, Sample_Year, Growth_Form, #Plot_Genus,
                   !!as.name(input$map_usergroup)) %>%
-  dplyr::summarise(Count = sum(Count)) %>%
+  dplyr::summarise(Count = sum(Count)) %>% ######  CHECK TO SEE IF I SHOULD ADD A NA.RM = TRUE TO GET AN ACCURATE COUNT
   ungroup() 
 
 mp_expan <- spdiv %>%
