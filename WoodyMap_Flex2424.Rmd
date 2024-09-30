@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = FALSE)
 
 rm(list=ls())
 
+
 #options(url.method = "wininet")
 #options(repos="http://cran.revolutionanalytics.com")
 #options(repos = c(CRAN = "https://cloud.r-project.org"))
@@ -152,6 +153,8 @@ col_group <- c("Plot_Code", "Plant_Code", "Start_Date", "Sample_Year", "Event_ID
 
 #Needs to get ride of Network, Park, and Subunit, Change Start_Date to Sample Date?
 common_columns <- c("Network_Code", "Park_Code", "Subunit_Code", "Plot_Code", "Start_Date", "Event_Type_Name", "Year") 
+
+remove_habcolumns <- c("Fit", "Confidence", "Sample_Year", "Event_ID", "Start_Date", "Plot_Code") 
 ```
 
 ```{r}
@@ -167,14 +170,16 @@ df_genus <- genus %>%
 
 df_events <- func_processdata(events, NA)
 
-df_events %<>%
-  dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4))
+# df_events %<>%
+#   dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4))
+
+broadgroup <- func_processdata(broadgroup, NA)
 
 #####TRY THIS!!!############
-# all_events <- df_events%>%
-#   left_join(broadgroup) %>%
-#   dplyr::filter(Event_Type != "QA/QC")%>% 
-#   left_join(location %>% dplyr::select(Network_Code, Park_Code, Subunit_Code, Plot_Code), by = "Plot_Code") 
+all_events <- df_events%>%
+  left_join(broadgroup) %>%
+  dplyr::filter(Event_Type != "QA/QC")%>%
+  left_join(location %>% dplyr::select(Network_Code, Park_Code, Subunit_Code, Plot_Code), by = "Plot_Code")
 
 #####TRY THIS!!!############
 
@@ -206,7 +211,6 @@ df_treediv <- df_trees %>% #----------finding raw count of live trees per growth
   dplyr::summarize(Count = n()) %>%
   ungroup() %>%
   full_join(df_treedivsum)
-
 
 
 func_seedsap <- function(df, form_col, total_col) {
@@ -263,13 +267,13 @@ genus_grouping <-  if (!exists("genus_group")) {
 
 ```{r TRYING TO SEE FOR PLANT CODE}
 # input <- list()
-# input$size_class = "Sapling"
-# # input$map_year <- "2017"
-# input$map_subunit <- "COWP" #check
-# input$map_spgroup <- "Plant_Code" # options are Genus and PLant Code
-# input$map_usergroup <- "Group22" # options are Genus, user group x y and z
-# input$map_season <- "Cycle"
-# input$map_year <- "2"
+# input$size_class = "Tree"
+# # input$map_year <- "2011"
+# input$map_subunit <- "BIRT" #check
+# input$map_spgroup <- "Genus" # options are Genus and PLant Code
+# input$map_usergroup <- "Genus" # options are Genus, user group x y and z
+# input$map_season <- "Sample_Year"
+# input$map_year <- "2011"
 
 observeEvent(eventExpr = input$button_UpdateMap, {
   shiny::req(!is.null(df_trees), !is.null(df_spdiv),  !is.null(input$map_subunit), !is.null(input$map_year), !is.null(input$size_class), !is.null(input$map_spgroup), !is.null(input$map_usergroup))
@@ -283,17 +287,14 @@ observeEvent(eventExpr = input$button_UpdateMap, {
      
  
      
-map_sequence <- df_events %>%
+map_sequence <- all_events %>%
   dplyr::filter(Subunit_Code == input$map_subunit) %>%
   dplyr::filter(!!as.name(input$map_season) == input$map_year) %>%
   pull(Event_ID)
 
 rv$map_sequence <- map_sequence
      
-     
-     
-     
-     
+    
 # woodymptop_species <- 
   if (input$map_spgroup == "Genus" & input$map_usergroup == "Genus") {
 #################### THIS WOULD HAVE TO BE A POTENTIAL CHANGE TO THIS PAGE.....EITHER THIS OR WOULD HAVE TO TAKE THE 
@@ -604,10 +605,10 @@ div(style = "margin-top: 10px; margin-right: 30px; align-self: center; ",
 div(style = "margin-top: 10px;", 
     
     renderUI({
-      shiny::req(!is.null(df_events))
-      if ("Cycle" %in% names(df_events)) {
+      shiny::req(!is.null(all_events))
+      if ("Cycle" %in% names(all_events)) {
         conditionalPanel(
-    condition = "(Cycle %in% names(df_trees))",
+    condition = "(Cycle %in% names(all_events))",
     selectInput("map_season", 
                 label = strong("Select Temporal Grouping:"), 
                 choices = c("Sample_Year", "Cycle") ))
@@ -624,9 +625,9 @@ div(style = "margin-top: 10px;",
 
 div(style = "margin-top: 10px;", 
     renderUI({
-      shiny::req(!is.null(df_events), !is.null(input$map_subunit), !is.null(input$map_season))
+      shiny::req(!is.null(all_events), !is.null(input$map_subunit), !is.null(input$map_season))
    
-      yearchoice <- df_events %>%
+      yearchoice <- all_events %>%
         dplyr::filter(Subunit_Code == input$map_subunit) %>%
         distinct(!!as.name(input$map_season)) %>%
         pull(.)

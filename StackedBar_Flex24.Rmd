@@ -180,8 +180,8 @@ df_genus <- genus %>%
 
 df_events <- func_processdata(events, NA)
 
-df_events %<>%
-  dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4))
+# df_events %<>%
+#   dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4))
 
 df_trees <- func_processdata(trees, "Tree") %>%
   dplyr::filter(Status_Name == "Live Tree") %>%
@@ -220,8 +220,9 @@ df_sap <- df_seedsap %>%
     dplyr::summarize(Seedling = sum(Seedling_Total))
   
   df_treesp <- df_trees %>%
-    dplyr::group_by(across(all_of(col_group)), Plant_Code) %>%
+    dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Plant_Code) %>%
     dplyr::summarise(Tree = n())
+  # 7452 from 21715
   
     df_treefull <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
                            list(df_sap,
@@ -232,6 +233,8 @@ df_sap <- df_seedsap %>%
       tidyr::pivot_longer(cols = c(Seedling, Sapling, Tree), 
                names_to = "Strata", 
                values_to = "Count")
+    
+    
 ```
 
 ```{r}
@@ -244,12 +247,12 @@ all_events <- df_events %>%
 
 ```{r}
 # input <- list()
-# input$stack_spatialunit <- "Network_Code"
-# input$stack_userunit <- "CUPN"
-# input$stack_season <- "Cycle"
-# input$stack_year <- "2"
-# input$stack_spatialhabitat <- "Group_A"
-# input$stack_userhabitat <- "Appalachian & Interior Mesophytic Forest"
+# input$stack_spatialunit <- "Subunit_Code"
+# input$stack_userunit <- "BIRT"
+# input$stack_season <- "Sample_Year"
+# input$stack_year <- "2011"
+# input$stack_spatialhabitat <- "All"
+# input$stack_userhabitat <- "All" #Appalachian & Interior Mesophytic Forest"
 # input$stack_spgroup <- "Genus" # options are Genus and plant code
 # input$stack_usergroup <- "Genus" #group x, y, z
 observeEvent(eventExpr = input$button_UpdatePlots, {
@@ -281,9 +284,10 @@ stack_sequence <- nplot %>%
 # woodystacktop_species <- 
 if (input$stack_spgroup == "Genus" & input$stack_usergroup == "Genus") {
 
-df_stacktop <- df_treefull %>%
-  dplyr::filter(Event_ID %in% stack_sequence, 
-                Strata == "Tree") %>%
+df_stacktop <- df_trees %>% # used to be df_treefull
+  dplyr::filter(Event_ID %in% stack_sequence) %>%
+                # , 
+                # Strata == "Tree") %>%
   left_join(df_genus) %>%
   dplyr::group_by(!!as.name(input$stack_spgroup)) %>%     #either group by plant code or by a group of selected genuses????
   dplyr::summarize(tree_obs = n()) %>%
@@ -474,7 +478,7 @@ renderUI({
   
   if ("Cycle" %in% names(all_events)) {
     conditionalPanel(
-    condition = "(Cycle %in% names(tree_basics))",
+    condition = "(Cycle %in% names(all_events))",
     selectInput("stack_season", 
                 label = strong("Select Temporal Grouping:"), 
                 choices = c("Sample_Year", "Cycle") ))

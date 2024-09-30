@@ -1,9 +1,11 @@
 ---
 title: "WoodySpecies_Flex24"
-output: 
+output:
   flexdashboard::flex_dashboard:
-    orientation: columns
-    vertical_layout: fill
+    orientation: rows
+    vertical_layout: scroll 
+    runtime:: shiny
+
 ---
 
 ```{r setup, include=FALSE}
@@ -143,6 +145,9 @@ col_group <- c("Plot_Code", "Plant_Code", "Start_Date", "Sample_Year", "Event_ID
 
 #Neesd to get ride of Network, Park, and Subunit, Change Start_Date to Sample Date?
 common_columns <- c("Network_Code", "Park_Code", "Subunit_Code", "Plot_Code", "Start_Date", "Event_Type_Name", "Year") 
+
+remove_habcolumns <- c("Fit", "Confidence", "Sample_Year", "Event_ID", "Start_Date", "Plot_Code") 
+
 ```
 
 ```{r message = FALSE, results = FALSE, echo = FALSE}
@@ -333,17 +338,21 @@ df_treeplot <- df_treeplot %>%
 
 ```
 
- 
 ```{r}
+
+observeEvent(eventExpr = input$button_UpdateTable, {
+  
+  
+  shiny::req(!is.null(input$woodytbl_spatialunit), !is.null(df_treeplot), !is.null(input$woodytbl_userunit), !is.null(input$woodytbl_season), !is.null(input$woodytbl_year), !is.null(input$woodytbl_spatialhabitat))
+  
+  
 df_wdevents <- all_events %>%
   dplyr::filter(
     !!as.name(input$woodytbl_spatialunit) == input$woodytbl_userunit,
     !!as.name(input$woodytbl_season) == input$woodytbl_year) %>%
   distinct(Event_ID) %>%
   pull(.)
-```
 
-```{r yes chat}
 summarise_stats <- function(data, group_col, stat_col, value) {
   data %>%
     dplyr::group_by(!!as.name(group_col)) %>%
@@ -370,6 +379,60 @@ df_selectedtreeplot <- df_woodysum %>%
   dplyr::select(!!as.name(group_col), everything()) %>%
   dplyr::select(-c(Event_ID, Column)) %>%
   dplyr::arrange(!!as.name(group_col))
+
+
+rv$df_selectedtreeplot <- reactable::reactable(df_selectedtreeplot,
+                                       rowStyle = function(index) {
+    # Check if the current row corresponds to the average or standard deviation row
+    if (df_selectedtreeplot$Plot_Code[index] == "average") {
+      list(borderTop = "2px solid black")  # Add a line above the average row
+    } else if (df_selectedtreeplot$Plot_Code[index] == "standard deviation") {
+      list(borderBottom = "2px solid black")  # Add a line below the standard deviation row
+    } else {
+      NULL  # No special styling for other rows
+    }
+  } ,                  
+                    highlight = TRUE,
+                     bordered = TRUE,
+                     pagination = TRUE,
+                     compact = TRUE,
+                     # resizable = TRUE,
+                     showPageSizeOptions = TRUE,
+                     filterable = TRUE,
+                     fullWidth = TRUE,
+                     defaultColDef = colDef(aggregate = "mean", 
+                                            format = colFormat(digits = 1),
+                                            html = TRUE, 
+                                            vAlign = "center",
+                                            headerVAlign = "bottom",
+                                            align = "left",
+                                            class = "group",
+                                            headerClass = "header"),
+                     # groupBy = input$woody_group, #this could be some sort of input!!! input$group paste0() maybe - y
+                     columns = list(
+                       group_col = colDef(name = as.character(group_col),  minWidth = 100), #filterable = TRUE,
+                       # `input$woody_group` = colDef(name = as.character(input$woody_group), filterable = TRUE, maxWidth = 100),
+                       `Plot_Code` = colDef(name = "Plot", html = TRUE),
+                                            
+                         # aggregate = "count",
+                         # format = list(aggregated = colFormat(suffix = " Plots"))),  used if using group_by
+                       `Start_Date` = colDef(name = "Survey Date"),
+                       `Live Tree Density <br> (count/ha) ` = colDef(html = TRUE),
+                       `Dead Tree Density <br> (count/ha)` = colDef(html = TRUE),
+                       `Seedling Density <br> (count/ha)`= colDef(html = TRUE),
+                       `Sapling Basal Area <br> (m<sup>2</sup>/ha)`= colDef(html = TRUE),
+                       `Sapling Density <br> (count/ha)`= colDef(html = TRUE),
+                       `Mean Canopy Cover <br> (%)` = colDef(html = TRUE)
+                       # ,
+                       #  Year = colDef(name = "Survey Year", 
+                       #                aggregate = "unique")
+                     ))
+
+
+# saveRDS(isolate(reactiveValuesToList(input)), paste0("treeplot_input.RDS"))
+# saveRDS(isolate(reactiveValuesToList(rv)), paste0("treeplot_rv.RDS"))
+
+})
 ```
 
 
@@ -438,102 +501,121 @@ df_selectedtreeplot <- df_woodysum %>%
 
 
 
-
-
-
-
-
-
-
-
-#OLDDDDD CODE NAURRR
-
-
-```{r seedsap plot 2 OE}
-rv$df_selectedtreeplot <- reactable::reactable(df_selectedtreeplot,
-                                       rowStyle = function(index) {
-    # Check if the current row corresponds to the average or standard deviation row
-    if (df_selectedtreeplot$Plot_Code[index] == "average") {
-      list(borderTop = "2px solid black")  # Add a line above the average row
-    } else if (df_selectedtreeplot$Plot_Code[index] == "standard deviation") {
-      list(borderBottom = "2px solid black")  # Add a line below the standard deviation row
-    } else {
-      NULL  # No special styling for other rows
-    }
-  } ,                  
-                    highlight = TRUE,
-                     bordered = TRUE,
-                     pagination = FALSE,
-                     compact = TRUE,
-                     resizable = TRUE,
-                     showPageSizeOptions = TRUE,
-                     filterable = TRUE,
-                     defaultColDef = colDef(aggregate = "mean", 
-                                            format = colFormat(digits = 1),
-                                            html = TRUE, 
-                                            vAlign = "center",
-                                            headerVAlign = "bottom",
-                                            align = "left",
-                                            class = "group",
-                                            headerClass = "header"),
-                     # groupBy = input$woody_group, #this could be some sort of input!!! input$group paste0() maybe - y
-                     columns = list(
-                       group_col = colDef(name = as.character(group_col),  minWidth = 100), #filterable = TRUE,
-                       # `input$woody_group` = colDef(name = as.character(input$woody_group), filterable = TRUE, maxWidth = 100),
-                       `Plot_Code` = colDef(name = "Plot", html = TRUE),
-                                            
-                         # aggregate = "count",
-                         # format = list(aggregated = colFormat(suffix = " Plots"))),  used if using group_by
-                       `Start_Date` = colDef(name = "Survey Date"),
-                       `Live Tree Density <br> (count/ha) ` = colDef(html = TRUE),
-                       `Dead Tree Density <br> (count/ha)` = colDef(html = TRUE),
-                       `Seedling Density <br> (count/ha)`= colDef(html = TRUE),
-                       `Sapling Basal Area <br> (m<sup>2</sup>/ha)`= colDef(html = TRUE),
-                       `Sapling Density <br> (count/ha)`= colDef(html = TRUE),
-                       `Mean Canopy Cover <br> (%)` = colDef(html = TRUE)
-                       # ,
-                       #  Year = colDef(name = "Survey Year", 
-                       #                aggregate = "unique")
-                     ))
-
-
-# saveRDS(isolate(reactiveValuesToList(input)), paste0("treeplot_input.RDS"))
-# saveRDS(isolate(reactiveValuesToList(rv)), paste0("treeplot_rv.RDS"))
-
-# })
-```
-
 Woody Plant Characteristics 
 =======================================================================
+
+####
+
+```{r}
 ### <font style="font-size: 20px"> Woody Plant Metrics </font>
 
-*<font size="3">This table shows woody stem abundance and canopy characteristics (height, cover) across years, park units, park subunits, and habitat. Basal area (m2) and density (stem count) are summarized at the hectare (ha) scale. * </font>
+# *<font size="3">This table shows woody stem abundance and canopy characteristics (height, cover) across years, park units, park subunits, and habitat. Basal area (m2) and density (stem count) are summarized at the hectare (ha) scale. * </font>
 
-Inputs {.sidebar data-width=225}
--------------------------------------
+div(
+  style = "display: flex; flex-wrap: wrap;",
+div(style = "margin-top: 10px; align-self: center; ", # margin-right: 30px; 
+    actionButton("button_UpdateTable", "Update Table") 
+), 
+
+div(style = "margin-top: 10px;",
+    renderUI({  
+      selectInput(
+  "woodytbl_spatialunit",
+  label = strong("Select Spatial Scale: "),
+  choices = c("Network_Code", "Park_Code", "Subunit_Code") 
+)
+}) 
+
+) , 
+
+div(style = "margin-top: 10px;",
+renderUI({ #needed bc reactive
+  shiny::req(!is.null(input$woodytbl_spatialunit), !is.null(all_events))
+  
+  selectInput(
+    "woodytbl_userunit",
+    label = strong(paste0("Select Individual Unit of ", input$woodytbl_spatialunit, ":" )),
+    choices = unique(all_events[input$woodytbl_spatialunit]) %>% pull(.) %>% sort()
+  )
+
+})
+) ,  
+
+div(style = "margin-top: 10px;",
+renderUI({
+  shiny::req(!is.null(all_events))
+  
+  if ("Cycle" %in% names(all_events)) {
+    # conditionalPanel(
+    # condition = "(Cycle %in% names(all_events)",
+    selectInput("woodytbl_season", 
+                label = strong("Select Temporal Grouping:"), 
+                choices = c("Sample_Year", "Cycle") )
+    
+    } else {
+      selectInput("woodytbl_season", 
+                label = strong("Select Temporal Grouping:"), 
+                choices = c("Sample_Year"), 
+                selected = "Sample_Year")
+      
+      }
+})
+
+),  
+
+div(style = "margin-top: 10px;", 
+    renderUI({
+      shiny::req(!is.null(all_events), !is.null(input$woodytbl_spatialunit), !is.null(input$woodytbl_userunit), !is.null(input$woodytbl_season))
+   
+      yearchoice <- all_events %>%
+        dplyr::filter(!!as.name(input$woodytbl_spatialunit) == input$woodytbl_userunit) %>%
+        distinct(!!as.name(input$woodytbl_season)) %>%
+        pull(.)
+      
+      selectInput(
+        "woodytbl_year", 
+        label = strong("Select", paste0(input$woodytbl_season), ":"), 
+        choices = sort(yearchoice),
+        selected = min(as.numeric(as.character(yearchoice)), na.rm = TRUE)
+        )
+      })
+
+), 
+
+div(style = "margin-top: 10px;",
+
+renderUI({
+  shiny::req(!is.null(broadgroup), !is.null(remove_habcolumns))
+  
+  habgroup <- names(broadgroup)[! names(broadgroup) %in% remove_habcolumns]
+  
+  selectInput(
+  "woodytbl_spatialhabitat", 
+  label = strong("Select Habitat Group: "),
+  choices = c("All", sort(habgroup))
+  )
+
+})
+)
+)
 
 
-
-
-
-
+```
 
 Row 
 -------------------------------------
 
 ```{r}
 output$seedsapplot <- renderReactable({
-  shiny::req(!is.null(input$woody_year), !is.null(rv$df_treeplot), !is.null(input$woody_group))
+  shiny::req(!is.null(rv$df_selectedtreeplot))
   
-  rv$df_treeplot
+  rv$df_selectedtreeplot
   
 })
 
-reactableOutput("seedsapplot")
-
+div(style = "width: 100%;", 
+    reactableOutput("seedsapplot"))
 ```
-
-
 
 ```{css styles}
 .border-left {
