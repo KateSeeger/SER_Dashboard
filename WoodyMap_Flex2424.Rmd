@@ -75,7 +75,8 @@ temp_rv <- shiny::reactiveValues(
   color_palette = NULL, 
   bc = NULL, 
   df_spdivbar = NULL, 
-  divtable = NULL
+  divtable = NULL #, 
+  # sp_div = NULL
 )
 ```
 
@@ -285,7 +286,7 @@ observeEvent(eventExpr = input$button_UpdateMap, {
 # saveRDS(isolate(reactiveValuesToList(rv)), paste0("bc_rv.RDS"))
 
      
- 
+# rv$df_spdiv <- df_spdiv
      
 map_sequence <- all_events %>%
   dplyr::filter(Subunit_Code == input$map_subunit) %>%
@@ -723,9 +724,9 @@ plotOutput("map_tree")
 ```
 
 
-Rows {data-height=250}
+Rows {.tabset .tabset-fade data-height=250}
 -----------------------------------------------------------------------
-
+### Filtered Data
 ```{r}
 output$maptable <- renderReactable({
   shiny::req(!is.null(rv$divtable))
@@ -750,6 +751,33 @@ output$maptable <- renderReactable({
 
 reactableOutput("maptable")
 ```
+
+### Raw Data
+```{r}
+output$maprawtable <- renderReactable({
+  shiny::req(!is.null(df_spdiv))
+
+
+  reactable::reactable(df_spdiv,
+                     pagination = TRUE,
+                     highlight = TRUE,
+                     fullWidth = TRUE,
+                     filterable = TRUE,
+                     resizable = T,
+                     compact = TRUE,
+                      defaultColDef = colDef(vAlign = "center",
+                                            headerVAlign = "bottom",
+                                            align = "left",
+                                            class = "group",
+                                            headerClass = "header",
+                                            minWidth = 100,
+                                            headerStyle = list(fontWeight = 500)
+                                            ))
+})
+
+reactableOutput("maprawtable")
+```
+
 
 
 ```{css styles}

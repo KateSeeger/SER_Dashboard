@@ -326,7 +326,6 @@ df_treeplot <- df_treeplot %>%
     `Mean Stand Height <br> (m)` = Stand_Height)
 ```
 
-
 ```{r}
 # input <- list()
 # input$woodytbl_spatialunit <- "Network_Code" #Network_Code, Subunit_Code, Park_Code
@@ -380,14 +379,18 @@ df_selectedtreeplot <- df_woodysum %>%
   dplyr::select(-c(Event_ID, Column)) %>%
   dplyr::arrange(!!as.name(group_col))
 
+df_selectedtreeplot[[group_col]] <- ifelse(df_selectedtreeplot$Plot_Code %in% c("average", "standard deviation"), "", df_selectedtreeplot[[group_col]])
+
 
 rv$df_selectedtreeplot <- reactable::reactable(df_selectedtreeplot,
                                        rowStyle = function(index) {
     # Check if the current row corresponds to the average or standard deviation row
     if (df_selectedtreeplot$Plot_Code[index] == "average") {
-      list(borderTop = "2px solid black")  # Add a line above the average row
+      list(borderTop = "2px solid black", 
+           height = "20px")  # Add a line above the average row
     } else if (df_selectedtreeplot$Plot_Code[index] == "standard deviation") {
-      list(borderBottom = "2px solid black")  # Add a line below the standard deviation row
+      list(borderBottom = "2px solid black", 
+           height = "20px")  # Add a line below the standard deviation row
     } else {
       NULL  # No special styling for other rows
     }
@@ -434,72 +437,6 @@ rv$df_selectedtreeplot <- reactable::reactable(df_selectedtreeplot,
 
 })
 ```
-
-
-
-
-
-```{r}
-### option two where Spatialunit is full, and spatial habitat is "All"
-# if (input$woodytbl_spatialhabitat == "All") {
-#   hotto <- df_treeplot %>%
-#     dplyr::filter(Event_ID %in% df_wdevents) %>%
-#   dplyr::left_join(all_events %>% dplyr::select(!!as.name(input$woodytbl_spatialunit), Plot_Code, Start_Date, Event_ID)) %>%
-#   dplyr::mutate(Column = "Raw")
-# 
-#   sdstats <- hotto %>%
-#   # dplyr::group_by(!!as.name(input$woodytbl_spatialunit)) %>%  #or spaitalunit if park/subunit
-#   dplyr::summarise(across(where(is.numeric), sd, na.rm = TRUE), .groups = "drop") %>%
-#   dplyr::mutate(Column = "Y_SD", 
-#                 Plot_Code = "standard deviation")
-# 
-# avgstats <- hotto %>%
-#   # dplyr::group_by(!!as.name(input$woodytbl_spatialunit)) %>% #or spaitalunit if park/subunit
-#   dplyr::summarise(across(where(is.numeric), mean, na.rm = TRUE), .groups = "drop") %>%
-#   dplyr::mutate(Column = "X_Average", 
-#                 Plot_Code = "average")
-# 
-# thotto <- hotto %>%
-#   dplyr::arrange(Plot_Code) %>%
-#   rbind.fill(avgstats) %>%
-#   rbind.fill(sdstats) %>%
-#   dplyr::select(!!as.name(input$woodytbl_spatialunit), everything()) 
-# 
-# } else {
-#   
-#   hotto <- df_treeplot %>%
-#   dplyr::filter(Event_ID %in% df_wdevents) %>%
-#   dplyr::left_join(all_events %>% dplyr::select(!!as.name(input$woodytbl_spatialhabitat), Plot_Code, Start_Date, Event_ID)) %>%
-#   dplyr::arrange(!!as.name(input$woodytbl_spatialhabitat), desc(Plot_Code)) %>% # remove if just park/subunit
-#   dplyr::mutate(Column = "Raw")
-# 
-# sdstats <- hotto %>%
-#   dplyr::group_by(!!as.name(input$woodytbl_spatialhabitat)) %>%  #or spaitalunit if park/subunit
-#   dplyr::summarise(across(where(is.numeric), sd, na.rm = TRUE), .groups = "drop") %>%
-#   dplyr::mutate(Column = "Y_SD", 
-#                 Plot_Code = "standard deviation")
-# 
-# avgstats <- hotto %>%
-#   dplyr::group_by(!!as.name(input$woodytbl_spatialhabitat)) %>% #or spaitalunit if park/subunit
-#   dplyr::summarise(across(where(is.numeric), mean, na.rm = TRUE), .groups = "drop") %>%
-#   dplyr::mutate(Column = "X_Average", 
-#                 Plot_Code = "average")
-# 
-# thotto <- hotto %>%
-#   dplyr::arrange(Plot_Code) %>%
-#   rbind.fill(avgstats) %>%
-#   rbind.fill(sdstats) %>%
-#   dplyr::select(!!as.name(input$woodytbl_spatialhabitat), everything()) %>%
-#   dplyr::arrange(!!as.name(input$woodytbl_spatialhabitat)) #, desc(Plot_Code)
-# }
-# 
-# 
-
-
-
-```
-
-
 
 Woody Plant Characteristics 
 =======================================================================
@@ -602,9 +539,9 @@ renderUI({
 
 ```
 
-Row 
+Row {.tabset .tabset-fade}
 -------------------------------------
-
+### Woody Plant Characteristics
 ```{r}
 output$seedsapplot <- renderReactable({
   shiny::req(!is.null(rv$df_selectedtreeplot))
@@ -616,6 +553,33 @@ output$seedsapplot <- renderReactable({
 div(style = "width: 100%;", 
     reactableOutput("seedsapplot"))
 ```
+
+### Raw Data
+```{r}
+output$rawseedsap <- renderReactable({
+  shiny::req(!is.null(df_treeplot))
+  
+    reactable::reactable(df_treeplot, 
+                       fullWidth = TRUE, 
+                       compact = TRUE, 
+                       pagination = TRUE,
+                       filterable = TRUE,
+                       defaultColDef = colDef(
+                         vAlign = "center",
+                         headerVAlign = "bottom",
+                         align = "left",
+                         class = "group",
+                         minWidth = 70,
+                         headerClass = "header"
+                         ))
+  
+  
+})
+
+div(style = "width: 100%;", 
+    reactableOutput("rawseedsapplot"))
+```
+
 
 ```{css styles}
 .border-left {
