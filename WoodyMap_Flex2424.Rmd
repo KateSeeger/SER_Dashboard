@@ -75,8 +75,11 @@ temp_rv <- shiny::reactiveValues(
   color_palette = NULL, 
   bc = NULL, 
   df_spdivbar = NULL, 
-  divtable = NULL #, 
-  # sp_div = NULL
+  divtable = NULL,
+  filterdata = NULL, 
+  df_trees = NULL,
+  divtabl = NULL, 
+  trees = NULL
 )
 ```
 
@@ -88,12 +91,11 @@ seedlingsapling <- read_csv(here::here("output", "CUPN_SeedlingSapling.csv")) #N
 broadgroup <- read_csv(here::here("output", "CUPN_BroadGroup.csv")) #used to be broadgroup
 # species_rich <- read_csv(here::here("Data_In","SpeciesDiversity_LongFormat_20230421.csv")) #waiting on new data from Tim
 genus <- read_csv(here::here("output", "TaxaTable.csv"))
-location <- read_csv(here::here("output", "Location_Table.csv")) #let's just call this LOCATION
+location <- read_csv(here::here("output", "Location_Table2.csv")) #let's just call this LOCATION
 canopycover <- read_csv(here::here("output", "CUPN_CanopyCover.csv"))
-genus_group <- read_csv(here::here("output", "Genus_grouping.csv"))
+# genus_group <- read_csv(here::here("output", "Genus_grouping.csv"))
 events <- read_csv(here::here("output", "CUPN_EventTable2.csv"))
 shapefile <- st_read(here::here('./cupn_shapefile/CUPN.shp'))
-  
 mp_compboundary <- st_transform(shapefile, crs = 4326)
 
 ```
@@ -163,27 +165,33 @@ func_processdata <- function(df, growth_form) {
   df %>%
     dplyr::mutate(Start_Date = as.Date(lubridate::mdy_hm(Start_Date)),
                   Sample_Year = as.factor(Sample_Year),
-                  Growth_Form = growth_form)
+                  Growth_Form = growth_form) # %>%
+    #as.data.frame()#
 }
 
+
+func_seedsap <- function(df, form_col, total_col) {
+  df %>%
+    replace(is.na(.), 0) %>%
+    dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Plant_Code, Growth_Form = form_col) %>%
+    dplyr::summarise(Count = sum({{total_col}}, na.rm = TRUE)) %>%
+    ungroup()
+}
+
+```
+
+```{r}
 df_genus <- genus %>% 
   dplyr::select(Plant_Code, Genus) 
 
-df_events <- func_processdata(events, NA)
-
-# df_events %<>%
-#   dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4))
-
 broadgroup <- func_processdata(broadgroup, NA)
 
-#####TRY THIS!!!############
-all_events <- df_events%>%
+df_events <- func_processdata(events, NA)
+
+all_events <- df_events %>%
   left_join(broadgroup) %>%
   dplyr::filter(Event_Type != "QA/QC")%>%
   left_join(location %>% dplyr::select(Network_Code, Park_Code, Subunit_Code, Plot_Code), by = "Plot_Code")
-
-#####TRY THIS!!!############
-
 
 df_trees <- func_processdata(trees, "Tree") %>%
   dplyr::filter(Status_Name == "Live Tree") %>%
@@ -195,7 +203,16 @@ df_seedsap <- func_processdata(seedlingsapling, NA)
 location %<>%
     dplyr::select(Park_Code, Subunit_Code, Plot_Code, Latitude, Longitude)
 
+genus_grouping <-  if (!exists("genus_group")) {
+  genus_grouping <- NULL
+  } else { 
+  genus_grouping <- genus_group
+  }
 
+```
+
+
+```{r}
 df_treedivsum <- df_trees %>% #----------Summing basal area per growth form, year, plot, and subunit 
   dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Growth_Form) %>%
   dplyr::summarise(Sum = sum(BA_ha)) %>%
@@ -213,14 +230,6 @@ df_treediv <- df_trees %>% #----------finding raw count of live trees per growth
   ungroup() %>%
   full_join(df_treedivsum)
 
-
-func_seedsap <- function(df, form_col, total_col) {
-  df %>%
-    replace(is.na(.), 0) %>%
-    dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Plant_Code, Growth_Form = form_col) %>%
-    dplyr::summarise(Count = sum({{total_col}}, na.rm = TRUE)) %>%
-    ungroup()
-}
 
 df_mapsapdiv <- func_seedsap(df_seedsap %>% dplyr::mutate(Growth_Form = "Sapling"), "Sapling", Sapling_Total)
 
@@ -258,13 +267,8 @@ df_spdiv <-  Reduce(function (...) { merge(..., all = TRUE) },  #full join idk w
                         list(df_treediv, df_sapdiv, df_seeddiv))
 #### end of code within the flexdashboard
 
-genus_grouping <-  if (!exists("genus_group")) {
-  genus_grouping <- NULL
-  } else { 
-  genus_grouping <- genus_group
-  }
-```
 
+```
 
 ```{r TRYING TO SEE FOR PLANT CODE}
 # input <- list()
@@ -277,17 +281,15 @@ genus_grouping <-  if (!exists("genus_group")) {
 # input$map_year <- "2011"
 
 observeEvent(eventExpr = input$button_UpdateMap, {
-  shiny::req(!is.null(df_trees), !is.null(df_spdiv),  !is.null(input$map_subunit), !is.null(input$map_year), !is.null(input$size_class), !is.null(input$map_spgroup), !is.null(input$map_usergroup))
+  shiny::req(!is.null(df_trees), !is.null(all_events), !is.null(df_spdiv),  !is.null(input$map_subunit), !is.null(input$map_year), !is.null(input$size_class), !is.null(input$map_spgroup), !is.null(input$map_usergroup)) 
+  
+saveRDS(isolate(reactiveValuesToList(input)), paste0("bc_input.RDS"))
+saveRDS(isolate(reactiveValuesToList(rv)), paste0("bc_rv.RDS"))
   
    withProgress(message = "Just a moment", detail = "Generating woody species map...", value = 0, { 
-#### OBSERVE EVENT
-
-# saveRDS(isolate(reactiveValuesToList(input)), paste0("bc_input.RDS"))
-# saveRDS(isolate(reactiveValuesToList(rv)), paste0("bc_rv.RDS"))
-
      
-# rv$df_spdiv <- df_spdiv
-     
+# rv$trees <- trees 
+    
 map_sequence <- all_events %>%
   dplyr::filter(Subunit_Code == input$map_subunit) %>%
   dplyr::filter(!!as.name(input$map_season) == input$map_year) %>%
@@ -295,7 +297,6 @@ map_sequence <- all_events %>%
 
 rv$map_sequence <- map_sequence
      
-    
 # woodymptop_species <- 
   if (input$map_spgroup == "Genus" & input$map_usergroup == "Genus") {
 #################### THIS WOULD HAVE TO BE A POTENTIAL CHANGE TO THIS PAGE.....EITHER THIS OR WOULD HAVE TO TAKE THE 
@@ -394,11 +395,11 @@ df_maplocation <- location  %>%
 df_treedivmap <- left_join(df_mapspdiv, df_maplocation)
 
 # rv$df_treedivtbl <- df_treedivmap %>%  calls to a reactive value
-df_treedivtbl <- df_treedivmap %>%
-  dplyr::select(Subunit_Code, Event_ID, Plot_Code, PlotNum, Sample_Year, Sum, everything())
+# df_treedivtbl <- df_treedivmap %>%
+#   dplyr::select(Subunit_Code, Event_ID, Plot_Code, PlotNum, Sample_Year, Sum, everything())
 
-
-
+# rv$df_treedivtbl <- df_treedivtbl
+# 
 
 df_treedivmap %<>%
   dplyr::filter(!is.na(Latitude)) %>%
@@ -466,12 +467,11 @@ bc <- bc %>%
 
 cat("Line4")
 
-saveRDS(isolate(reactiveValuesToList(input)), paste0("bc_input.RDS"))
-saveRDS(isolate(reactiveValuesToList(rv)), paste0("bc_rv.RDS"))
+# saveRDS(isolate(reactiveValuesToList(input)), paste0("bc_input.RDS"))
+# saveRDS(isolate(reactiveValuesToList(rv)), paste0("bc_rv.RDS"))
 
  rv$bc <- bc
 
- 
 
 # 
 })
@@ -492,7 +492,9 @@ cat("line1453")
 # chardata_long <- df_treedivmap
 renderUI({
   shiny::req(!is.null(click_marker), !is.null(rv$df_mapwide), !is.null(rv$color_palette), !is.null(rv$columns_to_include), !is.null(rv$map_sequence), !is.null(input$map_season))
+ 
   
+  cat("line13")
 chartdata_long <- rv$df_mapwide %>%
    dplyr::filter(Plot_Code == click_marker(), #"COWP013", ########## SHOULD BE click_marker(), ,#
                 Event_ID %in% rv$map_sequence) %>%
@@ -512,6 +514,7 @@ print(columns_to_include2)
 
 nn <- setNames(rv$color_palette, columns_to_include2)
  
+cat("line14")
 colors <- columns_to_include2
   
 # sort(unique(chartdata_long$Plot_Genus))
@@ -536,21 +539,23 @@ rv$df_spdivbar <- chartdata_long %>%
     scale_fill_manual(values = nn[colors],
 #scale_fill_manual(values = okabepalette[unique(rv$spcomp$Plot_Genus)],
                       drop = TRUE) 
+
+cat("line153")
 })
 
 
 renderUI({
-  shiny::req(!is.null(rv$df_mapwide), !is.null(click_marker), !is.null(input$map_subunit), !is.null(rv$map_sequence))
+  shiny::req(!is.null(rv$df_mapwide), !is.null(click_marker), !is.null(rv$map_sequence))
 
   # rv$comptable <- rv$df_treedivtbl %>%
 divtable <- rv$df_mapwide %>% #df_treedivtbl %>%
     dplyr::select(-Sum) %>%
     dplyr::filter(
       # Plot_Code == "COWP013",
-      Event_ID %in% rv$map_sequence, 
+      Event_ID %in% rv$map_sequence,
       Plot_Code == click_marker()
       )
-      
+
       # ,, !is.null(input$map_season), !is.null(input$map_year)
       # !!as.name(input$map_season) %in% input$map_year)
 
@@ -560,6 +565,20 @@ divtable <- rv$df_mapwide %>% #df_treedivtbl %>%
   rv$divtable <- divtable
 
   cat("Line44 divtable structure: ", str(rv$divtable))
+
+})
+
+#trying to add a filtered 
+renderUI({
+  shiny::req(!is.null(trees), !is.null(click_marker), !is.null(rv$map_sequence))
+
+  filtertrees <- trees %>%
+        dplyr::filter(
+      Event_ID %in% rv$map_sequence,
+      Plot_Code == "BIRT002" #click_marker()
+      )
+
+  rv$divtabl <- filtertrees
 
 })
 
@@ -654,43 +673,65 @@ div(style = "margin-top: 10px;",
          })
        ), 
 
+
+
+# UI for map_spgroup input
 div(style = "margin-top: 10px;",
     renderUI({
-  # shiny::req(!is.null(df_trees))
-      selectInput(
-        "map_spgroup",
-        label = strong("Select a taxanomic grouping: "),
-        choices = c("Genus", "Plant_Code"),
-        selected = "Genus"
-  )
-})
+       if (!exists("genus_grouping") || is.null(genus_grouping)) {
+      
+         selectInput(
+           "map_spgroup",
+           label = strong("Select a taxonomic grouping: "),
+           choices = c("Genus"), # Offer both options
+           selected = "Genus"
+         )
+        
+       } else {
+         selectInput(
+           "map_spgroup",
+           label = strong("Select a taxonomic grouping: "),
+           choices = c("Genus", "Plant_Code"), # Offer both options
+           selected = ""
+         )
+       }
+    })
 ),
 
+# UI for map_usergroup input with conditional logic
 div(style = "margin-top: 10px;",
   renderUI({
-    if (!exists("genus_grouping") || is.null(genus_grouping)) {      # If `genus_grouping` exists and is not null
-      
+    shiny::req(input$map_spgroup) # Ensure input$map_spgroup is available
+    
+    if (!exists("genus_grouping") || is.null(genus_grouping)) {
+      # If `genus_grouping` does not exist or is null
       selectInput(
         "map_usergroup",
         label = strong("Select a species grouping:"),
-        choices = "Genus",                    # Default value if null
+        choices = "Genus",                    
         selected = "Genus"
       )
 
     } else {
-      # If `genus_grouping` is null
+      # If `genus_grouping` is available
+      gg <- genus_grouping %>% dplyr::select(-Plant_Code)
+      genuscols <- colnames(gg)  # Get the column names
 
-      genuscols <- colnames(genus_grouping)  # Get the column names
+      # Exclude "Genus" if map_spgroup is set to "Plant_Code"
+      if (input$map_spgroup == "Plant_Code") {
+        genuscols <- setdiff(genuscols, "Genus")
+      }
 
       selectInput(
         "map_usergroup",
         label = strong("Select a species grouping:"),
-        choices = sort(genuscols),            # Provide the sorted column names
-        selected = "Genus"
+        choices = sort(genuscols),  # Provide sorted column names
+        selected = if ("Genus" %in% genuscols) "Genus" else ""
       )
     }
   })
 )
+
 )
 
 
@@ -726,7 +767,7 @@ plotOutput("map_tree")
 
 Rows {.tabset .tabset-fade data-height=250}
 -----------------------------------------------------------------------
-### Filtered Data
+### Data Summary
 ```{r}
 output$maptable <- renderReactable({
   shiny::req(!is.null(rv$divtable))
@@ -752,7 +793,7 @@ output$maptable <- renderReactable({
 reactableOutput("maptable")
 ```
 
-### Raw Data
+### Filtered
 ```{r}
 output$maprawtable <- renderReactable({
   shiny::req(!is.null(df_spdiv))
@@ -776,8 +817,33 @@ output$maprawtable <- renderReactable({
 })
 
 reactableOutput("maprawtable")
-```
 
+output$maptable1 <- renderReactable({
+  shiny::req(!is.null(rv$divtabl))
+
+  reactable::reactable(trees)
+    
+    
+    str(rv$divtabl   #,
+                     # pagination = FALSE,
+                     # highlight = TRUE,
+                     # fullWidth = TRUE,
+                     # filterable = TRUE,
+                     # resizable = T,
+                     # compact = TRUE,
+                     #  defaultColDef = colDef(vAlign = "center",
+                     #                        headerVAlign = "bottom",
+                     #                        align = "left",
+                     #                        class = "group",
+                     #                        headerClass = "header",
+                     #                        minWidth = 100,
+                     #                        headerStyle = list(fontWeight = 500)
+                     #                        )
+                     )
+})
+
+reactableOutput("maptable1")
+```
 
 
 ```{css styles}
