@@ -14,7 +14,7 @@ rm(list=ls())
 
 #options(url.method = "wininet")
 #options(repos="http://cran.revolutionanalytics.com")
-#options(repos = c(CRAN = "https://cloud.r-project.org"))
+options(repos = c(CRAN = "https://cloud.r-project.org"))
 
 ### Load libraries -----
 # Will automatically install any libraries it can't find
@@ -37,7 +37,7 @@ pkgs <- c("flexdashboard",
               "lubridate",
               "forcats",
               "httr", # use web services
-              "rgdal", # to use readOGR
+              # "rgdal", # to use readOGR
               "sp", # transform projections
               "purrr", # for applying functions to dplyr groups
               "dataMaid", # for data checks
@@ -93,7 +93,7 @@ broadgroup <- read_csv(here::here("output", "CUPN_BroadGroup.csv")) #used to be 
 genus <- read_csv(here::here("output", "TaxaTable.csv"))
 location <- read_csv(here::here("output", "Location_Table2.csv")) #let's just call this LOCATION
 canopycover <- read_csv(here::here("output", "CUPN_CanopyCover.csv"))
-# genus_group <- read_csv(here::here("output", "Genus_grouping.csv"))
+genus_group <- read_csv(here::here("output", "Genus_grouping.csv"))
 events <- read_csv(here::here("output", "CUPN_EventTable2.csv"))
 shapefile <- st_read(here::here('./cupn_shapefile/CUPN.shp'))
 mp_compboundary <- st_transform(shapefile, crs = 4326)
@@ -273,7 +273,6 @@ df_spdiv <-  Reduce(function (...) { merge(..., all = TRUE) },  #full join idk w
 ```{r TRYING TO SEE FOR PLANT CODE}
 # input <- list()
 # input$size_class = "Tree"
-# # input$map_year <- "2011"
 # input$map_subunit <- "BIRT" #check
 # input$map_spgroup <- "Genus" # options are Genus and PLant Code
 # input$map_usergroup <- "Genus" # options are Genus, user group x y and z
@@ -534,7 +533,7 @@ rv$df_spdivbar <- chartdata_long %>%
            position = "fill",
            stat = "identity") +
   theme_clean() +
-  # labs(x = "", y = "Proportion of genera", title = paste0("", input$size_class, ", ", input$map_year, ", ", click_marker())) + # paste0("", input$prop_year, ", ", input$Individual_Unit, ", ", input$Association))
+  labs(title = paste0(click_marker(), ", ",input$map_year), x = "", y = "") +
   scale_x_discrete(limits = positions) +
     scale_fill_manual(values = nn[colors],
 #scale_fill_manual(values = okabepalette[unique(rv$spcomp$Plot_Genus)],
@@ -570,12 +569,20 @@ divtable <- rv$df_mapwide %>% #df_treedivtbl %>%
 
 #trying to add a filtered 
 renderUI({
-  shiny::req(!is.null(trees), !is.null(click_marker), !is.null(rv$map_sequence))
+  shiny::req(!is.null(trees), !is.null(seedlingsapling), !is.null(click_marker), !is.null(rv$map_sequence), !is.null(input$size_class))
+  
+  if (input$size_class == "Tree") {
+    data <- trees %>%
+    dplyr::select(Plot_Code, Start_Date, Event_ID, Module, Tree_Number, Plant_Code, DBH)
+  } else {
+    data <- seedlingsapling
+  }
 
-  filtertrees <- trees %>%
-        dplyr::filter(
+  filtertrees <- data %>%
+    # dplyr::select(Plot_Code, Start_Date, Event_ID, Module, Tree_Number, Plant_Code, DBH) %>%
+    dplyr::filter(
       Event_ID %in% rv$map_sequence,
-      Plot_Code == "BIRT002" #click_marker()
+      Plot_Code == click_marker()
       )
 
   rv$divtabl <- filtertrees
@@ -674,7 +681,6 @@ div(style = "margin-top: 10px;",
        ), 
 
 
-
 # UI for map_spgroup input
 div(style = "margin-top: 10px;",
     renderUI({
@@ -688,10 +694,12 @@ div(style = "margin-top: 10px;",
          )
         
        } else {
+         
+         
          selectInput(
            "map_spgroup",
            label = strong("Select a taxonomic grouping: "),
-           choices = c("Genus", "Plant_Code"), # Offer both options
+           choices = c("Genus", "Species" = "Plant_Code"), # Offer both options   #### we need this to have as Species option can we change this somehow link??
            selected = ""
          )
        }
@@ -769,6 +777,10 @@ Rows {.tabset .tabset-fade data-height=250}
 -----------------------------------------------------------------------
 ### Data Summary
 ```{r}
+
+downloadLink("button_exportwdmapraw", label = "Download Data Summary") 
+
+
 output$maptable <- renderReactable({
   shiny::req(!is.null(rv$divtable))
 
@@ -776,8 +788,8 @@ output$maptable <- renderReactable({
   reactable::reactable(rv$divtable,
                      pagination = FALSE,
                      highlight = TRUE,
-                     fullWidth = TRUE,
-                     filterable = TRUE,
+                     # fullWidth = TRUE,
+                     # filterable = TRUE,
                      resizable = T,
                      compact = TRUE,
                       defaultColDef = colDef(vAlign = "center",
@@ -785,25 +797,40 @@ output$maptable <- renderReactable({
                                             align = "left",
                                             class = "group",
                                             headerClass = "header",
-                                            minWidth = 100,
+                                            minWidth = 65,
                                             headerStyle = list(fontWeight = 500)
                                             ))
 })
 
 reactableOutput("maptable")
+
+output$button_exportwdmapraw <- downloadHandler(
+    filename = function() {
+      paste0("WoodyRawData-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$divtable, file)
+    }
+  )
+
 ```
 
-### Filtered
+### Filtered Data
 ```{r}
-output$maprawtable <- renderReactable({
-  shiny::req(!is.null(df_spdiv))
+
+downloadLink("button_exportwdmapfilter", label = "Download Filtered Data") 
+
+# div(style = c("width: 100%;", "height: 95%;"),
 
 
-  reactable::reactable(df_spdiv,
-                     pagination = TRUE,
+output$maptable1 <- renderReactable({
+  shiny::req(!is.null(rv$divtabl))
+
+  reactable::reactable(rv$divtabl,
+                     pagination = FALSE,
                      highlight = TRUE,
-                     fullWidth = TRUE,
-                     filterable = TRUE,
+                     # fullWidth = TRUE,
+                     # filterable = TRUE,
                      resizable = T,
                      compact = TRUE,
                       defaultColDef = colDef(vAlign = "center",
@@ -811,38 +838,22 @@ output$maprawtable <- renderReactable({
                                             align = "left",
                                             class = "group",
                                             headerClass = "header",
-                                            minWidth = 100,
+                                            minWidth = 70,
                                             headerStyle = list(fontWeight = 500)
-                                            ))
-})
-
-reactableOutput("maprawtable")
-
-output$maptable1 <- renderReactable({
-  shiny::req(!is.null(rv$divtabl))
-
-  reactable::reactable(trees)
-    
-    
-    str(rv$divtabl   #,
-                     # pagination = FALSE,
-                     # highlight = TRUE,
-                     # fullWidth = TRUE,
-                     # filterable = TRUE,
-                     # resizable = T,
-                     # compact = TRUE,
-                     #  defaultColDef = colDef(vAlign = "center",
-                     #                        headerVAlign = "bottom",
-                     #                        align = "left",
-                     #                        class = "group",
-                     #                        headerClass = "header",
-                     #                        minWidth = 100,
-                     #                        headerStyle = list(fontWeight = 500)
-                     #                        )
+                                            )
                      )
 })
 
 reactableOutput("maptable1")
+
+output$button_exportwdmapfilter <- downloadHandler(
+    filename = function() {
+      paste0("WoodyFilteredData-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$divtabl, file)
+    }
+  )
 ```
 
 
