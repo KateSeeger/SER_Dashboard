@@ -212,7 +212,7 @@ genus_grouping <-  if (!exists("genus_group")) {
 ```
 
 
-```{r}
+```{r  start of woodymap_Flex2424 unique code}
 df_treedivsum <- df_trees %>% #----------Summing basal area per growth form, year, plot, and subunit 
   dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Growth_Form) %>%
   dplyr::summarise(Sum = sum(BA_ha)) %>%
@@ -489,7 +489,9 @@ cat("line1453")
 
 # df_mapwide instead of df_treedivmap same wide format thoughhhh
 # chardata_long <- df_treedivmap
-renderUI({
+
+observe({
+# renderUI({
   shiny::req(!is.null(click_marker), !is.null(rv$df_mapwide), !is.null(rv$color_palette), !is.null(rv$columns_to_include), !is.null(rv$map_sequence), !is.null(input$map_season))
  
   
@@ -543,7 +545,7 @@ cat("line153")
 })
 
 
-renderUI({
+observe({ #used to be renderUI
   shiny::req(!is.null(rv$df_mapwide), !is.null(click_marker), !is.null(rv$map_sequence))
 
   # rv$comptable <- rv$df_treedivtbl %>%
@@ -568,7 +570,7 @@ divtable <- rv$df_mapwide %>% #df_treedivtbl %>%
 })
 
 #trying to add a filtered 
-renderUI({
+observe({ #used to be renderUI
   shiny::req(!is.null(trees), !is.null(seedlingsapling), !is.null(click_marker), !is.null(rv$map_sequence), !is.null(input$size_class))
   
   if (input$size_class == "Tree") {
@@ -668,7 +670,8 @@ div(style = "margin-top: 10px;",
       })
 
 ),
-   div(style = "margin-top: 10px;", 
+
+div(style = "margin-top: 10px;", 
        renderUI({ 
          shiny::req(!is.null(df_trees))
          selectInput(
@@ -683,69 +686,146 @@ div(style = "margin-top: 10px;",
 
 # UI for map_spgroup input
 div(style = "margin-top: 10px;",
-    renderUI({
-       if (!exists("genus_grouping") || is.null(genus_grouping)) {
-      
-         selectInput(
-           "map_spgroup",
-           label = strong("Select a taxonomic grouping: "),
-           choices = c("Genus"), # Offer both options
-           selected = "Genus"
-         )
-        
-       } else {
-         
-         
-         selectInput(
-           "map_spgroup",
-           label = strong("Select a taxonomic grouping: "),
-           choices = c("Genus", "Species" = "Plant_Code"), # Offer both options   #### we need this to have as Species option can we change this somehow link??
-           selected = ""
-         )
-       }
-    })
-),
-
-# UI for map_usergroup input with conditional logic
-div(style = "margin-top: 10px;",
-  renderUI({
-    shiny::req(input$map_spgroup) # Ensure input$map_spgroup is available
     
-    if (!exists("genus_grouping") || is.null(genus_grouping)) {
-      # If `genus_grouping` does not exist or is null
+   renderUI({
+    if (!exists("genus_grouping") || is.null(genus_grouping)) {      # If `genus_grouping` exists and is not null
+      
       selectInput(
         "map_usergroup",
         label = strong("Select a species grouping:"),
-        choices = "Genus",                    
+        choices = "Genus",                    # Default value if null
         selected = "Genus"
       )
 
     } else {
-      # If `genus_grouping` is available
-      gg <- genus_grouping %>% dplyr::select(-Plant_Code)
-      genuscols <- colnames(gg)  # Get the column names
+      # If `genus_grouping` is null
 
-      # Exclude "Genus" if map_spgroup is set to "Plant_Code"
-      if (input$map_spgroup == "Plant_Code") {
-        genuscols <- setdiff(genuscols, "Genus")
-      }
+      genuscols <- colnames(genus_grouping)  # Get the column names
+      genuscols <- setdiff(genuscols, "Plant_Code")
 
       selectInput(
         "map_usergroup",
         label = strong("Select a species grouping:"),
-        choices = sort(genuscols),  # Provide sorted column names
-        selected = if ("Genus" %in% genuscols) "Genus" else ""
+        choices = sort(genuscols),            # Provide the sorted column names
+        selected = "Genus"
       )
     }
   })
-)
+),
+
+div(style = "margin-top: 10px;",
+   renderUI({
+   shiny::req(!is.null(input$map_usergroup))
+      
+      if (input$map_usergroup == "Genus") {
+      
+      selectInput(
+        "map_spgroup",
+        label = strong("Select a taxanomic grouping: "),
+        choices = c("Genus"),
+        selected = "Genus"
+        
+      ) } else {
+    
+         selectInput(
+        "map_spgroup",
+        label = strong("Select a taxanomic grouping: "),
+        choices = c("Species" = "Plant_Code"),
+        selected = "Plant_Code")
+  }
+})
 
 )
-
-
-
+)
 ```
 
+
+```{r selecinput working code 11/30/24}
+##################################### example example example 
+  #  renderUI({
+  #   if (!exists("genus_grouping") || is.null(genus_grouping)) {      # If `genus_grouping` exists and is not null
+  #     
+  #     selectInput(
+  #       "stack_usergroup",
+  #       label = strong("Select a species grouping:"),
+  #       choices = "Genus",                    # Default value if null
+  #       selected = "Genus"
+  #     )
+  # 
+  #   } else {
+  #     # If `genus_grouping` is null
+  # 
+  #     genuscols <- colnames(genus_grouping)  # Get the column names
+  #     genuscols <- setdiff(genuscols, "Plant_Code")
+  # 
+  #     selectInput(
+  #       "stack_usergroup",
+  #       label = strong("Select a species grouping:"),
+  #       choices = sort(genuscols),            # Provide the sorted column names
+  #       selected = "Genus"
+  #     )
+  #   }
+  # })
+
+#     renderUI({
+#    shiny::req(!is.null(input$stack_usergroup))
+#       
+#       if (input$stack_usergroup == "Genus") {
+#       
+#       selectInput(
+#         "stack_spgroup",
+#         label = strong("Select a taxanomic grouping: "),
+#         choices = c("Genus"),
+#         selected = "Genus"
+#       ) } else {
+#     
+#          selectInput(
+#         "stack_spgroup",
+#         label = strong("Select a taxanomic grouping: "),
+#         choices = c("Species" = "Plant_Code"),
+#         selected = "Plant_Code")
+#   }
+# })
+     
+############################################### example example
+
+# div(style = "margin-top: 10px;",
+#   renderUI({
+#     shiny::req(input$map_spgroup) # Ensure input$map_spgroup is available
+#     
+#     if (!exists("genus_grouping") || is.null(genus_grouping)) {
+#       # If `genus_grouping` does not exist or is null
+#       selectInput(
+#         "map_usergroup",
+#         label = strong("Select a species grouping:"),
+#         choices = "Genus",                    
+#         selected = "Genus"
+#       )
+# 
+#     } else {
+#       
+#       # If `genus_grouping` is available
+#       gg <- genus_grouping %>% dplyr::select(-Plant_Code)
+#       genuscols <- colnames(gg)  # Get the column names
+# 
+#       
+#       # Exclude "Genus" if map_spgroup is set to "Plant_Code"
+#       if (input$map_spgroup == "Plant_Code") {
+#         genuscols <- setdiff(genuscols, "Genus")
+#       } 
+# 
+#       selectInput(
+#         "map_usergroup",
+#         label = strong("Select a species grouping:"),
+#         choices = sort(genuscols),  # Provide sorted column names
+#         selected = if ("Genus" %in% genuscols) "Genus" else ""
+#       )
+#  }
+#   })
+# )
+# 
+# )
+```
 
 Rows
 -----------------------------------------------------------------------
@@ -778,7 +858,7 @@ Rows {.tabset .tabset-fade data-height=250}
 ### Data Summary
 ```{r}
 
-downloadLink("button_exportwdmapraw", label = "Download Data Summary") 
+downloadLink("button_exportwdmapsum", label = "Download Data Summary") 
 
 
 output$maptable <- renderReactable({
@@ -804,9 +884,9 @@ output$maptable <- renderReactable({
 
 reactableOutput("maptable")
 
-output$button_exportwdmapraw <- downloadHandler(
+output$button_exportwdmapsum <- downloadHandler(
     filename = function() {
-      paste0("WoodyRawData-", Sys.Date(), ".csv", sep="")
+      paste0("WoodySummaryData-", Sys.Date(), ".csv", sep="")
     },
     content = function(file) {
       write.csv(rv$divtable, file)
@@ -815,7 +895,7 @@ output$button_exportwdmapraw <- downloadHandler(
 
 ```
 
-### Filtered Data
+### Filtered Raw Data
 ```{r}
 
 downloadLink("button_exportwdmapfilter", label = "Download Filtered Data") 
