@@ -50,7 +50,7 @@ pkgs <- c("flexdashboard",
               "lubridate",
               "forcats",
               "httr", # use web services
-              "rgdal", # to use readOGR
+              # "rgdal", # to use readOGR
               "sp", # transform projections
               "purrr", # for applying functions to dplyr groups
               "dataMaid", # for data checks
@@ -85,7 +85,11 @@ rv <- reactiveValues(SeedlingSapling = NULL, SpeciesDiversity = NULL, Tree = NUL
 
 #### might have to change the reactive value names??? read the shiny
 temp_rv <- shiny::reactiveValues(
-  df_selectedtreeplot = NULL
+  df_selectedtreeplot = NULL, 
+  test = NULL, 
+  df_wdevents = NULL, 
+  datatreetbl = NULL, 
+  dataseedsaptbl = NULL
 )
 ```
 
@@ -212,9 +216,6 @@ genus_grouping <-  if (!exists("genus_group")) {
 ```
 
 
-
-
-
 ```{r}
 modules <- all_events %>%
   dplyr::select(Event_ID, Number_Sampled_Modules, Number_Sampled_Corners) 
@@ -233,11 +234,6 @@ seedsap_plot <- df_seedsap %>%
     Sapling510_BA = (0.00007854 * (7.5)^2 ) * Sapling_5_10_DBH) %>%
   left_join(modules)
 
-# write.csv(seedsap_plot, "seedsap1.csv")
-```
-
-
-```{r}
 seedsap_plot <- seedsap_plot  %>%
   dplyr::group_by(Plot_Code, Start_Date) %>%
   dplyr::mutate(Seedling_Density = sum(Seedling_Ht_5_50, 
@@ -330,8 +326,8 @@ df_treeplot <- df_treeplot %>%
 # input <- list()
 # input$woodytbl_spatialunit <- "Network_Code" #Network_Code, Subunit_Code, Park_Code
 # input$woodytbl_userunit <- "CUPN"
-# input$woodytbl_season <- "Cycle" # Sample_Year, Cycle
-# input$woodytbl_year <- "2"
+# input$woodytbl_season <- "Sample_Year" # Sample_Year, Cycle
+# input$woodytbl_year <- "2011"
 # input$woodytbl_spatialhabitat <- "Group_A" # All, Group_A, Group_B_Common_Name
 # ## input$woodytbl_userhabitat <- "Appalachian Oak - Chestnut Forest" mayhaps this is not needed here because we are including everything
 
@@ -351,6 +347,8 @@ df_wdevents <- all_events %>%
     !!as.name(input$woodytbl_season) == input$woodytbl_year) %>%
   distinct(Event_ID) %>%
   pull(.)
+
+rv$df_wdevents <- df_wdevents 
 
 summarise_stats <- function(data, group_col, stat_col, value) {
   data %>%
@@ -381,6 +379,7 @@ df_selectedtreeplot <- df_woodysum %>%
 
 df_selectedtreeplot[[group_col]] <- ifelse(df_selectedtreeplot$Plot_Code %in% c("average", "standard deviation"), "", df_selectedtreeplot[[group_col]])
 
+rv$test <- df_selectedtreeplot
 
 rv$df_selectedtreeplot <- reactable::reactable(df_selectedtreeplot,
                                        rowStyle = function(index) {
@@ -422,6 +421,7 @@ rv$df_selectedtreeplot <- reactable::reactable(df_selectedtreeplot,
                        `Start_Date` = colDef(name = "Survey Date"),
                        `Live Tree Density <br> (count/ha) ` = colDef(html = TRUE),
                        `Dead Tree Density <br> (count/ha)` = colDef(html = TRUE),
+                       `Mean Stand Height <br> (m)` = colDef(html = TRUE),
                        `Seedling Density <br> (count/ha)`= colDef(html = TRUE),
                        `Sapling Basal Area <br> (m<sup>2</sup>/ha)`= colDef(html = TRUE),
                        `Sapling Density <br> (count/ha)`= colDef(html = TRUE),
@@ -436,6 +436,31 @@ rv$df_selectedtreeplot <- reactable::reactable(df_selectedtreeplot,
 # saveRDS(isolate(reactiveValuesToList(rv)), paste0("treeplot_rv.RDS"))
 
 })
+
+observe({
+  shiny::req(!is.null(trees), !is.null(rv$df_wdevents))
+
+    datatreetbl <- trees %>%
+      dplyr::select(Plot_Code, Start_Date, Event_ID, Module, Tree_Number, Plant_Code, DBH) %>%
+      dplyr::mutate(Event_ID = as.character(Event_ID)) %>%
+      dplyr::filter(Event_ID %in% rv$df_wdevents)
+
+  rv$datatreetbl <- datatreetbl
+
+})
+
+observe({
+  shiny::req(!is.null(seedlingsapling), !is.null(rv$df_wdevents))
+
+    dataseedsaptbl <- seedlingsapling %>%
+      dplyr::mutate(Event_ID = as.character(Event_ID)) %>%
+      dplyr::filter(Event_ID %in% rv$df_wdevents)
+
+  rv$dataseedsaptbl <- dataseedsaptbl
+
+})
+
+
 ```
 
 Woody Plant Characteristics 
@@ -543,6 +568,9 @@ Row {.tabset .tabset-fade}
 -------------------------------------
 ### Woody Plant Characteristics
 ```{r}
+
+downloadLink("button_exportWoodyStemTable", label = "Export Woody Table Filtered Data")
+
 output$seedsapplot <- renderReactable({
   shiny::req(!is.null(rv$df_selectedtreeplot))
   
@@ -552,18 +580,33 @@ output$seedsapplot <- renderReactable({
 
 div(style = "width: 100%;", 
     reactableOutput("seedsapplot"))
+
+output$button_exportWoodyStemTable <- downloadHandler(
+    filename = function() {
+      paste0("data-", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      shiny::req(!is.null(rv$test))
+      write.csv(rv$test, file, row.names = FALSE) # I should add row.names = FALSE
+      # shiny::req(!is.null(rv$df_selectedtreeplot))
+      # write.csv(rv$df_selectedtreeplot, file, row.names = FALSE) # I should add row.names = FALSE
+    }
+)
+
+
 ```
 
-### Raw Data
+### Filtered Raw Tree Data
 ```{r}
-output$rawseedsap <- renderReactable({
-  shiny::req(!is.null(df_treeplot))
-  
-    reactable::reactable(df_treeplot, 
-                       fullWidth = TRUE, 
-                       compact = TRUE, 
-                       pagination = TRUE,
-                       filterable = TRUE,
+downloadLink("button_exporttreetbl", label = "Download Filtered Tree CSV") 
+
+output$woody_rawtreetbl <- renderReactable({
+  shiny::req(!is.null(rv$datatreetbl))
+
+  reactable::reactable(rv$datatreetbl,
+                       fullWidth = TRUE,
+                       compact = TRUE,
+                       # filterable = TRUE,
                        defaultColDef = colDef(
                          vAlign = "center",
                          headerVAlign = "bottom",
@@ -572,14 +615,59 @@ output$rawseedsap <- renderReactable({
                          minWidth = 70,
                          headerClass = "header"
                          ))
-  
-  
+
 })
 
-div(style = "width: 100%;", 
-    reactableOutput("rawseedsapplot"))
+
+reactableOutput("woody_rawtreetbl", height = "40%")
+
+output$button_exporttreetbl <- downloadHandler(
+    filename = function() {
+      paste0("TreeFilteredData-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$datatreetbl, file)
+    }
+  )
+
 ```
 
+### Filtered Raw Seedling and Sapling Data
+```{r}
+
+downloadLink("button_exportseedsaptbl", label = "Download Filtered Seedling and Sapling CSV") 
+
+output$woody_rawseedsap <- renderReactable({
+  shiny::req(!is.null(rv$dataseedsaptbl))
+
+  reactable::reactable(rv$dataseedsaptbl,
+                       fullWidth = TRUE,
+                       compact = TRUE,
+                       # filterable = TRUE,
+                       defaultColDef = colDef(
+                         vAlign = "center",
+                         headerVAlign = "bottom",
+                         align = "left",
+                         class = "group",
+                         minWidth = 70,
+                         headerClass = "header"
+                         ))
+
+})
+
+
+reactableOutput("woody_rawseedsap", height = "40%")
+
+output$button_exportseedsaptbl <- downloadHandler(
+    filename = function() {
+      paste0("SeedSapFilteredData-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$dataseedsaptbl, file)
+    }
+  )
+
+```
 
 ```{css styles}
 .border-left {

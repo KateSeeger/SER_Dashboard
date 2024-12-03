@@ -651,7 +651,8 @@ output$stackplotly_tree <- renderPlotly({
 plotlyOutput("stackplotly_tree", height = "70%") #, width = "50%") # width used to be 50 I don't think this changed anything
 ```
 
-Rows {data-height=125}
+
+Rows {.tabset .tabset-fade data-height=200}
 -----------------------------------------------------------------------
 ### Data Summary
 ```{r}
@@ -693,10 +694,7 @@ output$button_exportstackbarsum <- downloadHandler(
 # verticalLayout(plotlyOutput("plotly_tree"), reactableOutput("table_tree"))
 ```
 
-
-Rows {.tabset .tabset-fade data-height=200}
------------------------------------------------------------------------
-### Filtered Raw Data
+### Filtered Raw Tree Data 
 ```{r}
 
 downloadLink("button_exportstackbartreesum", label = "Download Data Summary") 
@@ -733,12 +731,12 @@ output$button_exportstackbartreesum <- downloadHandler(
       paste0("StakedBarSummaryData-", Sys.Date(), ".csv", sep="")
     },
     content = function(file) {
-      write.csv(rv$col_sptreefull, file)
+      write.csv(rv$datatree, file)
     }
   )
 ```
 
-### Filtered Data Seedling Sapling
+### Filtered Raw Seedling Sapling Data
 ```{r}
 
 downloadLink("button_exportstackbarseedsapsum", label = "Download Data Summary") 
@@ -769,7 +767,7 @@ output$button_exportstackbarseedsapsum <- downloadHandler(
       paste0("StakedBarSummaryData-", Sys.Date(), ".csv", sep="")
     },
     content = function(file) {
-      write.csv(rv$col_sptreefull, file)
+      write.csv(rv$dataseedsap, file)
     }
   )
 
