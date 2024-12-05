@@ -52,7 +52,7 @@ pkgs <- c("flexdashboard",
               "lubridate",
               "forcats",
               "httr", # use web services
-              "rgdal", # to use readOGR
+              # "rgdal", # to use readOGR
               "sp", # transform projections
               "purrr", # for applying functions to dplyr groups
               "dataMaid", # for data checks

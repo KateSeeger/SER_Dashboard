@@ -90,7 +90,7 @@ trees <- read_csv(here::here("output", "CUPN_TreeBasics.csv")) #NEWNEW cycle tre
 seedlingsapling <- read_csv(here::here("output", "CUPN_SeedlingSapling.csv")) #NEWNEW cycle seedling sapling
 broadgroup <- read_csv(here::here("output", "CUPN_BroadGroup.csv")) #used to be broadgroup
 # species_rich <- read_csv(here::here("Data_In","SpeciesDiversity_LongFormat_20230421.csv")) #waiting on new data from Tim
-genus <- read_csv(here::here("output", "TaxaTable.csv"))
+taxa <- read_csv(here::here("output", "TaxaTable.csv"))
 location <- read_csv(here::here("output", "Location_Table2.csv")) #let's just call this LOCATION
 canopycover <- read_csv(here::here("output", "CUPN_CanopyCover.csv"))
 genus_group <- read_csv(here::here("output", "Genus_grouping.csv"))
@@ -136,7 +136,7 @@ jane <- c('#a5cee2', '#1f78b4', '#b2df8a', '#e7298b', '#33a02b', '#997dd4', '#00
 # function to group by a plot, year and find the count of n
 makefun <- function(data) {
   data %>% 
-  dplyr::group_by(Plot_Code, Year) %>%
+  dplyr::group_by(Plot_Code, sample_Year) %>%
   dplyr::summarize(n())
   
 }
@@ -155,7 +155,7 @@ positions <- c("Tree", "Sapling", "Seedling")
 col_group <- c("Plot_Code", "Plant_Code", "Start_Date", "Sample_Year", "Event_ID")
 
 #Needs to get ride of Network, Park, and Subunit, Change Start_Date to Sample Date?
-common_columns <- c("Network_Code", "Park_Code", "Subunit_Code", "Plot_Code", "Start_Date", "Event_Type_Name", "Year") 
+common_columns <- c("Network_Code", "Park_Code", "Subunit_Code", "Plot_Code", "Start_Date", "Event_Type_Name", "Sample_Year") 
 
 remove_habcolumns <- c("Fit", "Confidence", "Sample_Year", "Event_ID", "Start_Date", "Plot_Code") 
 ```
@@ -181,7 +181,7 @@ func_seedsap <- function(df, form_col, total_col) {
 ```
 
 ```{r}
-df_genus <- genus %>% 
+df_genus <- taxa %>% 
   dplyr::select(Plant_Code, Genus) 
 
 broadgroup <- func_processdata(broadgroup, NA)
@@ -309,7 +309,6 @@ df_treesunits <- df_trees %>%
   ungroup() %>%
   top_n(7, tree_obs) %>%
   droplevels(.)
-
 
 woodymptop_species <- df_treesunits %>%
                         distinct(!!as.name(input$map_spgroup)) %>%  # use !!as.name to refer to the column
@@ -595,7 +594,7 @@ observe({ #used to be renderUI
 
 
 
-Maps
+Woody Species Maps
 =======================================================================
 ### <font style="font-size: 20px"> Mapped Proportion of Woody Species </font>
 

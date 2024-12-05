@@ -1,0 +1,2169 @@
+---
+title: "Flexdashboard11"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll 
+    runtime:: shiny
+---
+
+```{r setup, include=FALSE}
+
+rm(list=ls())
+### NOTES
+# Converted all tibbles to data frames to get rid of phantom column name errors
+
+### NAMING RULES
+# Functions: FuncTest(dat1_there, dat2_here)
+# Action buttons: button_PushMe
+# User inputs: sel_SelectMe
+# Lists, data frames, vectors, variables...: station_files_list, station_df,  station_vec, here_is_a_variable
+# Data frame cols: df$ColThisOne, df$ColThatOne
+# List elements: list$ElementOne, list$ElementTwo
+# Reactive elements: rv$ThisOne, rv$ThatOne
+# Temporary variables: temp_this_df
+# Well panel id's: wp_FilterParkSite
+
+#options(url.method = "wininet")
+#options(repos="http://cran.revolutionanalytics.com")
+#options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+### Load libraries -----
+# Will automatically install any libraries it can't find
+pkgs <- c("flexdashboard", 
+              "shiny", 
+              "knitr", 
+              "readr",
+              "dplyr",
+              "odbc", # pull data from SQL server
+              "leaflet", 
+              "here",
+              "plotly", 
+              "tidyverse", 
+              "plyr", 
+              "sf",
+              "readr",
+              "magrittr",
+              "bslib", 
+              "ggplot2",
+              "patchwork",
+              "leaflet.extras", 
+              "lubridate",
+              "forcats",
+              "httr", # use web services
+              # "rgdal", # to use readOGR
+              "sp", # transform projections
+              "purrr", # for applying functions to dplyr groups
+              "dataMaid", # for data checks
+              "shinyFiles", # for user to save files in specified location
+              "RColorBrewer", # to display brewer palettes
+              "shinyjs", # for easy functions that use JavaScript
+              "stringr", # to detect text snippets
+              "reactable",
+              "reactablefmtr",
+              "base", 
+              "htmltools", 
+              "ggthemes",
+              "data.table", # for fast lag calcs
+              "DT", # for interactive tables
+              "cowplot", # to get legends from plots
+              "crosstalk", # for SharedData
+              "gridExtra", # for arranging plots and adding plot annotations (ggplotly can't do captions or subtitles)
+              "RgoogleMaps", # for MaxZoom & MinZoom
+              "leaflet.minicharts") # for pie charts in leaflet maps
+
+
+installed_pkgs <- pkgs %in% installed.packages()
+if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE, repos='http://cran.us.r-project.org') #repos is new line of code!!!! 
+lapply(pkgs, library, character.only = TRUE)
+
+invisible(lapply(pkgs, library, character.only = TRUE))
+
+options(shiny.maxRequestSize=60*1024^2) #increase the file upload limit to 90MB.
+
+rv <- reactiveValues(SeedlingSapling = NULL, SpeciesDiversity = NULL, Tree = NULL, CanopyCover = NULL, StandHeight = NULL, Genus = NULL, LatLong = NULL, Species_Cover = NULL, Cover_Class = NULL, Exotics = NULL, CWD = NULL, BroadGroup = NULL, CycleNumber = NULL)  #this does not yet apply
+
+
+#### might have to change the reactive value names??? read the shiny
+temp_rv <- shiny::reactiveValues(
+  df_mapwide = NULL, 
+  columns_to_include = NULL,
+  color_palette = NULL, 
+  bc = NULL, 
+  ec = NULL, 
+  nc = NULL,
+  map_nativesequence = NULL, 
+  plotly_tree = NULL, 
+  col_sptreefull = NULL, 
+  stack_sequence = NULL,
+  dataseedsap = NULL, 
+  datatree = NULL, 
+  df_selectedtreeplot = NULL, 
+  test = NULL, 
+  df_wdevents = NULL, 
+  datatreetbl = NULL, 
+  dataseedsaptbl = NULL, 
+  df_mapwide = NULL, 
+  columns_to_include = NULL,
+  color_palette = NULL, 
+  bc = NULL, 
+  df_spdivbar = NULL, 
+  divtable = NULL,
+  filterdata = NULL, 
+  df_trees = NULL,
+  divtabl = NULL, 
+  trees = NULL
+)
+```
+
+```{r}
+
+# Define the folder path where the files are located
+folder_path <- here::here("output")  # Modify this as needed
+
+# General function to load data files based on a keyword
+load_data_by_keyword <- function(folder_path, keyword) {
+  # List all CSV files in the folder
+  files <- list.files(path = folder_path, pattern = "\\.csv$", full.names = TRUE)
+  
+  # Filter files that contain the specified keyword in the name
+  matched_files <- files[grepl(keyword, files, ignore.case = TRUE)]
+  
+  # If there's at least one matching file, load the first one
+  if (length(matched_files) > 0) {
+    message(paste("Loading file:", matched_files[1]))  # For logging purposes
+    return(read_csv(matched_files[1]))  # Read the first matching file
+  } else {
+    message(paste("No files containing '", keyword, "' found in the folder.", sep = ""))
+    return(NULL)  # Return NULL if no matching file is found
+  }
+}
+
+# Load data for different categories using the general function
+trees <- load_data_by_keyword(folder_path, "tree")
+location <- load_data_by_keyword(folder_path, "location")
+broadgroup <- load_data_by_keyword(folder_path, "broadgroup")
+speciesrich <- load_data_by_keyword(folder_path, "speciesdiversity")
+genus <- load_data_by_keyword(folder_path, "genus_grouping")
+canopycover <- load_data_by_keyword(folder_path, "canopycover")
+taxa <- load_data_by_keyword(folder_path, "taxa")
+events <- load_data_by_keyword(folder_path, "event")
+seedlingsapling <- load_data_by_keyword(folder_path, "seedlingsapling")
+speciescover <- load_data_by_keyword(folder_path, "speciescover")
+coverclass <- load_data_by_keyword(folder_path, "coverclass")
+genus_group <- load_data_by_keyword(folder_path, "grouping")
+```
+
+```{r message = FALSE, results = FALSE, echo = FALSE}
+
+shapefile <- st_read(here::here('./cupn_shapefile/CUPN.shp'))
+mp_compboundary <- st_transform(shapefile, crs = 4326)
+
+```
+
+```{r functions}
+### Functions-----
+
+#rounding function 
+#stick to a certain function naming rule
+round_df <- function(x, digits) {
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x
+}
+
+options(scipen=999)
+
+#keeping only first letter of character
+makeInitials <- function(charVec) {
+  make.unique(vapply(strsplit(toupper(charVec), " "), 
+                     function(x) paste(substr(x, 1, 1), collapse = ""), 
+                     vector("character", 1L)))
+}
+
+#color palettes
+Okabe_Ito <- c("#E69F00", "#56B4E9", "#009E73", '#CC6677',"#F0E442", "#0072B2", "#D55E00", 
+               "#CC79A7", "#000000",'#DDDDDD', '#EE6678', '#99DDFF', 
+               '#BBCC33', '#332288', '#882255', '#FFAABB')
+
+okabe_ito <- c( "#0072B2", "#D55E00", 
+               "#CC79A7", "#000000",  '#CC6677', '#BBCC33', '#99DDFF', 
+                '#332288', '#882255', '#FFAABB', "#E69F00", "#56B4E9", "#009E73", "#F0E442")
+
+viridis <- c("#fde725", "#5ec962", "#21918c","#3b528b","#440154")
+
+jane <- c('#a5cee2', '#1f78b4', '#b2df8a', '#e7298b', '#33a02b', '#997dd4', '#000000', '#fc9a99','#e21a1c', '#fdbe6f', '#ff7f00', '#9c9c9c', '#cab2d6', '#6a3d9a', '#feff99', '#b15929')
+
+# function to group by a plot, year and find the count of n
+makefun <- function(data) {
+  data %>% 
+  dplyr::group_by(Plot_Code, Sample_Year) %>%
+  dplyr::summarize(n())
+  
+}
+##### css functions
+integer_columns <- function(maxWidth = 60, ...) {
+  colDef(maxWidth = maxWidth, align = "center",...)
+}
+
+with_tooltip <- function(value, tooltip) {
+  tags$abbr(style = "text-decoration: underline; text-decoration-style: dotted; cursor: help", title = tooltip, value)
+}
+
+# lists for organizing column orders
+positions <- c("Tree", "Sapling", "Seedling")
+
+col_group <- c("Plot_Code", "Plant_Code", "Start_Date", "Sample_Year", "Event_ID")
+
+#Needs to get ride of Network, Park, and Subunit, Change Start_Date to Sample Date?
+common_columns <- c("Network_Code", "Park_Code", "Subunit_Code", "Plot_Code", "Start_Date", "Event_Type_Name", "Sample_Year") 
+
+remove_habcolumns <- c("Fit", "Confidence", "Sample_Year", "Event_ID", "Start_Date", "Plot_Code") 
+```
+
+```{r}
+func_processdata <- function(df, growth_form) {
+  df %>%
+    dplyr::mutate(Start_Date = as.Date(lubridate::mdy_hm(Start_Date)),
+                  Sample_Year = as.factor(Sample_Year),
+                  Growth_Form = growth_form) # %>%
+}
+
+func_seedsap <- function(df, form_col, total_col) {
+  df %>%
+    replace(is.na(.), 0) %>%
+    dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Plant_Code, Growth_Form = form_col) %>%
+    dplyr::summarise(Count = sum({{total_col}}, na.rm = TRUE)) %>%
+    ungroup()
+}
+
+```
+
+```{r}
+
+df_genus <- taxa %>% 
+  dplyr::select(Plant_Code, Genus) 
+
+broadgroup <- func_processdata(broadgroup, NA)
+
+df_events <- func_processdata(events, NA)
+
+all_events <- df_events %>%
+  left_join(broadgroup) %>%
+  dplyr::filter(Event_Type != "QA/QC")%>%
+  left_join(location %>% dplyr::select(Network_Code, Park_Code, Subunit_Code, Plot_Code), by = "Plot_Code") #used to have Network Code
+
+df_trees <- func_processdata(trees, "Tree") %>%
+  dplyr::filter(Status_Name == "Live Tree") %>%
+  dplyr::mutate(BA_ha = ((pi * DBH^2) / 40000) / 0.04)
+
+df_seedsap <- func_processdata(seedlingsapling, NA)
+
+location %<>%
+    dplyr::select(Park_Code, Subunit_Code, Plot_Code, Latitude, Longitude)
+
+genus_grouping <-  if (!exists("genus_group")) {
+  genus_grouping <- NULL
+  } else { 
+  genus_grouping <- genus_group
+  }
+
+```
+
+```{r Nativity Map Process 1}
+
+#list of high priority species 
+nonnative_hp <- taxa %>%
+  dplyr::filter(Flag_High_Priority_Exotic == "High") %>%
+  pull(Plant_Code)
+
+nonnative <- taxa %>%
+  dplyr::filter(Nativity == "Non_Native")
+
+#joining species richness dataset with taxonomic designations
+df_speciesrich <- speciesrich %>%
+  left_join(select(taxa, Plant_Code, Network_Scientific_Name, Nativity, Genus, Growth_Form, Flag_High_Priority_Exotic), by = "Plant_Code")
+
+#selecting only "exotic species" and designating them as high or low in a column called non-native
+species_exotics <- df_speciesrich %>%
+  dplyr::filter(Nativity == "Non-Native") %>% 
+  dplyr::mutate(Flag_High_Priority_Exotic = replace_na(Flag_High_Priority_Exotic, "Low"))
+
+```
+
+
+```{r Nativity Map Observe Event}
+observeEvent(eventExpr = input$button_UpdateNativeTreeCompMap, {
+  shiny::req(!is.null(input$mp_nativeunit), !is.null(input$mp_nativeyr), !is.null(mp_compboundary), !is.null(location), !is.null(df_speciesrich), !is.null(speciescover), !is.null(taxa), !is.null(input$mp_nativegroup), !is.null(species_exotics), !is.null(input$mp_nativecycle), !is.null(all_events))
+  
+# input values
+# input <- list()
+# input$mp_nativeunit <- "BIRT"
+# input$mp_nativeyr <- "2011"
+# input$mp_nativegroup <- "Genus"
+# input$mp_nativecycle <- "Sample_Year"
+  cat("Line1")
+  withProgress(message = "Just a moment", detail = "Generating native species maps...", value = 0, {
+  
+nmap_spgroup <- input$mp_nativegroup
+
+constancy_native <- speciescover %>%
+  dplyr::left_join(select(taxa, Plant_Code, Genus)) %>%
+    dplyr::select(Plot_Code, Start_Date, Plant_Code, !!as.name(nmap_spgroup), Cover_Class, !!as.name(input$mp_nativecycle)) 
+
+
+df_complatlong <- location %>% 
+  dplyr::select(-Park_Code) %>% #for some reason people want park code hmm can't do that for mapping smh
+  dplyr::mutate(Plot_Num = substr(Plot_Code, 5, 10))
+
+species_exoticsnum <- df_speciesrich %>%
+  dplyr::filter(Nativity == "Native" | 
+                Nativity == "Non-Native") %>%
+  dplyr::group_by(Plot_Code, Event_ID, !!as.name(input$mp_nativecycle), Nativity) %>%
+  dplyr::summarise(Exotic_count = n()) %>%
+  ungroup()
+
+
+df_numexotics <- species_exotics %>%
+   dplyr::mutate(Network_Scientific_Name2 = Network_Scientific_Name, 
+                Taxa2 = !!as.name(input$mp_nativegroup),
+                Network_Scientific_Name = case_when(Flag_High_Priority_Exotic == "High" ~  as.character(Network_Scientific_Name), TRUE ~ "Other")) %>%
+  dplyr::mutate(!! input$mp_nativegroup := case_when(Flag_High_Priority_Exotic == "High" ~ !!as.name(input$mp_nativegroup), TRUE ~ "Other")) %>%
+  dplyr::group_by(Plot_Code, Event_ID,
+                  Network_Scientific_Name, 
+                  !!as.name(nmap_spgroup),
+                  !!as.name(input$mp_nativecycle)) %>%
+  dplyr::summarise(Num = n()) %>%
+  ungroup()
+
+expanded <- df_numexotics %>%
+  dplyr::select(Plot_Code, Event_ID, !!as.name(input$mp_nativecycle)) %>%
+  dplyr::group_by(Plot_Code, Event_ID, !!as.name(input$mp_nativecycle)) %>%
+  distinct() %>%
+  ungroup() %>%
+  dplyr::mutate(!! input$mp_nativegroup := as.factor("Other"), 
+                Network_Scientific_Name = as.factor("Other")) %>%
+  cbind(Num = 0)
+
+df_numexotics <- dplyr::full_join(df_numexotics, expanded) 
+
+df_numexotics %<>%
+   dplyr::group_by(Plot_Code, Event_ID,
+                  !!as.name(input$mp_nativegroup), !!as.name(input$mp_nativecycle)) %>%
+  dplyr::summarise(Num = sum(Num)) %>%
+  ungroup()
+
+mp_nativezoom <- df_complatlong %>%
+  dplyr::filter(Subunit_Code == input$mp_nativeunit)
+
+
+map_nativesequence <- all_events %>%
+  dplyr::filter(Subunit_Code == input$mp_nativeunit) %>%
+  dplyr::filter(!!as.name(input$mp_nativecycle) == input$mp_nativeyr) %>%
+  pull(Event_ID)
+
+rv$map_nativesequence <- map_nativesequence
+
+#filters and widens with the raw numbers 
+nonnativeprop <- species_exoticsnum %>%
+  dplyr::filter(Event_ID %in% map_nativesequence) %>%
+  dplyr::filter(!!as.name(input$mp_nativecycle) %in% input$mp_nativeyr) %>%
+  pivot_wider(names_from = Nativity, 
+              values_from = Exotic_count) %>%
+  left_join(df_complatlong) %>%
+  dplyr::filter(!is.na(Latitude)) %>%
+  dplyr::filter(!is.na(Longitude)) %>%
+  replace(is.na(.), 0) 
+
+rv$ec = leaflet::leaflet(data = mp_compboundary) %>%
+  addTiles() %>%
+  addPolygons(data = mp_compboundary, color = ~ "black") %>%
+  addMinicharts(nonnativeprop$Longitude,
+                  nonnativeprop$Latitude, # time = as.character(rv$native_comp$Year),
+                  chartdata = dplyr::select(nonnativeprop, -c(Subunit_Code, Event_ID, Plot_Num, Plot_Code, all_of(input$mp_nativecycle), Latitude, Longitude)), 
+                  type = "pie",
+                  width = 40,
+                  col = Okabe_Ito,
+                  showLabels = F
+    ) %>%
+    addLabelOnlyMarkers(df_complatlong$Longitude,
+                      df_complatlong$Latitude, 
+                      label =  df_complatlong$Plot_Num,
+                      labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T, style=list('color'="#000000", 'fontSize'="15px"))) %>%
+        addScaleBar(position = "bottomright") %>%
+    fitBounds(min(mp_nativezoom$Longitude), min(mp_nativezoom$Latitude), max(mp_nativezoom$Longitude), max(mp_nativezoom$Latitude)) 
+
+native_comp <- df_numexotics %>%
+  dplyr::filter(Event_ID %in% map_nativesequence) %>%
+  dplyr::filter(!!as.name(input$mp_nativecycle) %in% input$mp_nativeyr)
+
+native_comp <- native_comp %>%
+   pivot_wider(names_from = !!as.name(input$mp_nativegroup), 
+               values_from = Num) %>%
+  dplyr::select(sort(names(.))) %>%
+  dplyr::select(-Other, everything()) 
+
+# joining the park, subunit, plot, lat, and long  
+native_comp <- left_join(native_comp, df_complatlong, by = "Plot_Code")
+
+native_comp <- native_comp %>%
+  dplyr::filter(!is.na(Latitude)) %>%
+  dplyr::filter(!is.na(Longitude)) %>%
+  replace(is.na(.), 0) 
+
+rv$nc = leaflet::leaflet(data = mp_compboundary) %>%
+  addTiles() %>%
+  addPolygons(data = mp_compboundary, color = ~ "black") %>%
+  addMinicharts(native_comp$Longitude,
+                  native_comp$Latitude, 
+                  chartdata = dplyr::select(native_comp, -c(Event_ID, Subunit_Code, Plot_Num, Plot_Code, all_of(input$mp_nativecycle), Latitude, Longitude)), 
+                  type = "pie",
+                  width = 40, 
+                  col = Okabe_Ito,
+                  showLabels = F
+    ) %>%
+    addLabelOnlyMarkers(df_complatlong$Longitude,
+                      df_complatlong$Latitude, 
+                      label =  df_complatlong$Plot_Num,
+                      labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T, style=list('color'="#000000", 'fontSize'="15px"))) %>%
+        addScaleBar(position = "bottomright") %>%
+    fitBounds(min(mp_nativezoom$Longitude), min(mp_nativezoom$Latitude), max(mp_nativezoom$Longitude), max(mp_nativezoom$Latitude)) 
+
+})
+})
+
+```
+
+
+```{r Stacked Bar Process 1}
+df_sap <- df_seedsap %>%
+    dplyr::select(all_of(col_group), 
+                  Plant_Code,
+                  Sapling_Total) %>%
+    dplyr::group_by(across(all_of(col_group))) %>%
+    dplyr::summarize(Sapling = sum(Sapling_Total))
+  
+  df_seed <- df_seedsap %>%
+    dplyr::select(all_of(col_group), 
+                  Plant_Code, 
+                  Seedling_Total) %>%
+    dplyr::group_by(across(all_of(col_group))) %>%
+    dplyr::summarize(Seedling = sum(Seedling_Total))
+  
+  df_treesp <- df_trees %>%
+    dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Plant_Code) %>%
+    dplyr::summarise(Tree = n())
+  # 7452 from 21715
+  
+    df_treefull <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
+                           list(df_sap,
+                                df_seed,
+                                df_treesp))
+    
+    
+    df_treefull %<>%
+      tidyr::pivot_longer(cols = c(Seedling, Sapling, Tree), 
+               names_to = "Strata", 
+               values_to = "Count")
+    
+```
+
+
+```{r Stacked Bar Observe Event}
+# input <- list()
+# input$stack_spatialunit <- "Subunit_Code"
+# input$stack_userunit <- "BIRT"
+# input$stack_season <- "Sample_Year"
+# input$stack_year <- "2011"
+# input$stack_spatialhabitat <- "All"
+# input$stack_userhabitat <- "All" #Appalachian & Interior Mesophytic Forest"
+# input$stack_spgroup <- "Genus" # options are Genus and plant code
+# input$stack_usergroup <- "Genus" #group x, y, z
+observeEvent(eventExpr = input$button_UpdatePlots, {
+  
+  cat("Line0")
+
+ shiny::req(!is.null(input$stack_spatialunit), !is.null(input$stack_userunit), !is.null(input$stack_spatialhabitat), !is.null(df_treefull), !is.null(all_events), !is.null(input$stack_year), !is.null(input$stack_spgroup), !is.null(input$stack_season), !is.null(input$stack_userhabitat))
+
+ 
+ cat("Line1")
+  withProgress(message = "Just a moment", detail = "Generating stacked bar chart...", value = 0, {
+  
+#this code is selecting for the spatial scale, for plotting bar chats we can either look at everything across the entire plot, ORRRR  we can look within a park/subunit and select for the smaller grouping
+ if (input$stack_spatialhabitat == "All" & input$stack_userhabitat == "All") {
+   nplot <- all_events %>%
+     dplyr::filter(!!as.name(input$stack_spatialunit) == input$stack_userunit) %>%
+     distinct(!!as.name(input$stack_season), Plot_Code, Event_ID)
+   
+   } else {
+   nplot <- all_events %>%
+     dplyr::filter(!!as.name(input$stack_spatialunit) == input$stack_userunit) %>%
+     dplyr::filter(!!as.name(input$stack_spatialhabitat) == input$stack_userhabitat) %>%
+     distinct(!!as.name(input$stack_season), Plot_Code, Event_ID)
+   } 
+
+stack_sequence <- nplot %>%
+  dplyr::filter(!!as.name(input$stack_season) == input$stack_year) %>%
+  pull(Event_ID)
+
+rv$stack_sequence <- as.character(stack_sequence)
+
+
+if (input$stack_spgroup == "Genus" & input$stack_usergroup == "Genus") {
+
+df_stacktop <- df_trees %>% # used to be df_treefull
+  dplyr::filter(Event_ID %in% stack_sequence) %>%
+  left_join(df_genus) %>%
+  dplyr::group_by(!!as.name(input$stack_spgroup)) %>% 
+  dplyr::summarize(tree_obs = n()) %>%
+  ungroup() %>%
+  top_n(7, tree_obs) %>%
+  droplevels(.)
+
+woodystacktop_species <- df_stacktop %>%
+                        distinct(!!as.name(input$stack_spgroup)) %>%  # use !!as.name to refer to the column
+                        pull(.)
+
+woodystacktop_species <- as.character(c(as.character(woodystacktop_species), "Other"))
+
+  } else {
+    genus_group <- genus_grouping 
+
+    woodystacktop_species <- unique(genus_group[[input$stack_spgroup]])
+
+    woodystacktop_species <- as.character(c(as.character(woodystacktop_species), "Other"))
+
+    df_treefull %<>%
+      full_join(genus_grouping) %>%
+      dplyr::select(-Genus)
+
+  }
+
+df_sptreefull <- df_treefull %>%
+  dplyr::filter(Event_ID %in% stack_sequence) %>%
+  left_join(df_genus) %>%
+  dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4),
+                Plant_Code = as.factor(Plant_Code)) %>%
+  dplyr::mutate(Plot_Genus = forcats::fct_other(.[[input$stack_spgroup]], #works for genus genus and genus group
+                                                   keep = woodystacktop_species, ### this could be an input
+                                                   other_level = 'Other')) %>%
+  dplyr::mutate(Plot_Genus = as.factor(Plot_Genus)) %>% 
+  dplyr::mutate(!!as.name(input$stack_usergroup) := case_when(
+    Plot_Genus == "Other" ~ "Other", 
+    TRUE ~ .[[input$stack_usergroup]])) %>%
+  dplyr::group_by(Sample_Year, Strata,
+                  !!as.name(input$stack_usergroup)) %>%
+  dplyr::summarise(Count = sum(Count, na.rm = TRUE)) %>%
+  ungroup() 
+
+stack_expan <- df_sptreefull %>%
+  dplyr::select(Sample_Year, Strata) %>%
+  distinct() %>%
+  dplyr::mutate(
+    # Dynamically create a column based on input$map_usergroup
+    !! input$stack_usergroup := "Other",  
+    Count = 0  # Add 'Count' column with value 0
+  )
+
+df_sptreefull %<>%
+  full_join(stack_expan) %>%
+  dplyr::group_by(Strata, #Plot_Genus, Sample_Year
+                  !!as.name(input$stack_usergroup)) %>%
+  dplyr::summarise(Count = sum(Count)) %>%
+  ungroup() 
+  
+
+col_sptreefull <- df_sptreefull %>%
+  tidyr::pivot_wider(names_from = input$stack_usergroup, 
+                     values_from = Count)
+
+rv$col_sptreefull <- col_sptreefull %>%
+  dplyr::select(Strata, sort(setdiff(tidyselect::peek_vars(), "Other")), Other) %>% ### new new 12/24
+  dplyr::arrange(factor(Strata, levels = positions))
+
+  columns_to_include <- col_sptreefull %>%
+    dplyr::select(-Strata) %>% #Sample_Year, 
+    dplyr::select(Other, everything()) %>%
+    colnames()
+
+  color_palette <- jane[1:length(columns_to_include)]
+
+  color_palette[length(color_palette)] <- "#333333"
+
+  columns_to_include <- c(setdiff(columns_to_include, "Other"), "Other")
+
+
+nn <- setNames(color_palette, columns_to_include)
+ 
+colors <- columns_to_include
+
+df_sptreefull[[input$stack_usergroup]] <- factor(df_sptreefull[[input$stack_usergroup]], levels = columns_to_include)
+
+levels(df_sptreefull[[input$stack_usergroup]])
+
+page_height = 650
+
+    plot_tree <- df_sptreefull %>%
+       ggplot2::ggplot(aes(x = Strata, 
+                           y = Count, 
+                           fill = !!as.name(input$stack_usergroup))) + 
+       geom_bar(width = 0.45, 
+                position = "fill", 
+                stat = "identity") + 
+       theme_clean() + 
+       labs(x = "", y = "") + 
+       ggtitle("") + 
+       theme(plot.title = element_text(lineheight = 3, 
+                                       face = "bold", 
+                                       color = "black", 
+                                       size = 12)) + 
+      scale_fill_manual(values = nn[colors]) +
+       scale_x_discrete(limits = positions) 
+       
+   rv$plotly_tree <-
+ # if (x == 1 ) {
+       ggplotly(plot_tree, width = 475) %>% #, height = page_height
+  layout(
+  margin = list(
+  l = 50,#50, 
+  r = 50,#50,
+  b = 100,#100,
+  t = 0,#100,
+  pad = 0 ), #40)   ,
+  legend = list(orientation = 'h',
+                xanchor = "center",
+                borderwidth = 0.5,
+                x = 0.5,
+                y = -0.092,
+                title = "",
+                font = list(size = 11),   
+  annotations = list(text = paste0("Relative Proportion of Woody Stem Size Classes within <br>", input$stack_userhabitat, " of ",input$stack_userunit), 
+                     font = list(size = 13), 
+                     showarrow = FALSE,
+                     xref = 'paper', x = 0.75,
+                     yref = 'paper', y = 1.1)
+  # , 
+  # annotations = list(text = paste0("Number of Surveyed Plots:", sum(count(nplot)$freq), "<br>Total densities of genera in all plots of the selected spatial and habitat groups <br> (seedlings and saplings summed at 1 and 10 m2 quadrats; <br> trees summed at the 400m2 plot level)"), #added comma
+  #                    font = list(size = 12), 
+  #                    showarrow = FALSE,
+  #                           xref = 'paper', x = 0.5,
+  #                           yref = 'paper', y = -0.30)   ##### THIS ANNOTATION IS NOT SHOWING UP
+  ) )
+   
+})
+})
+
+observe({
+  shiny::req(!is.null(trees), !is.null(rv$stack_sequence))
+
+    datatree <- trees %>%
+      dplyr::select(Plot_Code, Start_Date, Event_ID, Module, Tree_Number, Plant_Code, DBH) %>%
+      dplyr::mutate(Event_ID = as.character(Event_ID)) %>%
+      dplyr::filter(Event_ID %in% rv$stack_sequence)
+
+  rv$datatree <- datatree
+
+})
+
+observe({
+  shiny::req(!is.null(seedlingsapling), !is.null(rv$stack_sequence))
+
+    dataseedsap <- seedlingsapling %>%
+      dplyr::mutate(Event_ID = as.character(Event_ID)) %>%
+      dplyr::filter(Event_ID %in% rv$stack_sequence)
+
+  rv$dataseedsap <- dataseedsap
+
+})
+```
+
+
+
+```{r Woody Species Tbl Process 1}
+modules <- all_events %>%
+  dplyr::select(Event_ID, Number_Sampled_Modules, Number_Sampled_Corners) 
+
+seedsap_plot <- df_seedsap %>% 
+  dplyr::mutate(Module = as.factor(Module), 
+                Corner = as.factor(Corner)) %>%
+  dplyr::group_by(Plot_Code,
+                  Event_ID,
+                  Start_Date) %>%
+  dplyr::summarise(across(where(is.numeric), sum, na.rm = TRUE), .groups = "drop") %>%
+  ungroup() %>%
+  dplyr::mutate(Sapling01_BA =  (0.00007854 * (0.5)^2 ) * Sapling_0_1_DBH,
+    Sapling12h_BA = (0.00007854 * (1.75)^2 ) * Sapling_1_2half_DBH,
+    Sapling2h5_BA = (0.00007854 * (3.25)^2 ) * Sapling_2half_5_DBH ,
+    Sapling510_BA = (0.00007854 * (7.5)^2 ) * Sapling_5_10_DBH) %>%
+  left_join(modules)
+
+seedsap_plot <- seedsap_plot  %>%
+  dplyr::group_by(Plot_Code, Start_Date) %>%
+  dplyr::mutate(Seedling_Density = sum(Seedling_Ht_5_50, 
+                                       Seedling_Ht_5_15, 
+                                       Seedling_Ht_15_30,
+                                       Seedling_Ht_30_50,
+                                       Seedling_Ht_50_137)/(Number_Sampled_Corners*0.0001), #for guln this should be /0.001 bc calculated at the 10 m2 level
+         Sapling_BA = sum(Sapling01_BA, 
+                          Sapling12h_BA,
+                          Sapling2h5_BA, 
+                          Sapling510_BA)/(Number_Sampled_Modules*0.001), #m2/ha
+         Sapling_Density = sum(Sapling_0_1_DBH,
+                               Sapling_1_2half_DBH,
+                               Sapling_2half_5_DBH,
+                               Sapling_5_10_DBH)/(Number_Sampled_Modules*0.001)) #m2/ha
+
+
+df_seedsapplot <- seedsap_plot %>%
+  dplyr::select(Plot_Code, Start_Date, Sapling_BA,
+                Sapling_Density, Seedling_Density)
+
+
+
+df_stndhtplot <-  df_events %>%
+  dplyr::select(Plot_Code, Start_Date, Stand_Height)
+  
+df_treebaden <- df_trees %>%
+  dplyr::group_by(Plot_Code,
+                  Event_ID,
+                  Start_Date) %>%
+  dplyr::summarize(Tree_Countha = n()/0.04, 
+                   Tree_BAha = sum(BA_ha, na.rm = T)) %>%
+  ungroup()
+
+
+df_treedeadha <- func_processdata(trees, "Tree") %>%
+  dplyr::filter(Status_Name!="Live Tree", 
+                DBH != "NULL") %>%
+  dplyr::group_by(Plot_Code,
+                  Start_Date) %>%
+  dplyr::summarize(Tree_Countdead = n()/0.04) %>%
+  ungroup()
+
+
+df_treefullplot <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
+                           list(df_treebaden, df_treedeadha, df_stndhtplot))
+df_treefullplot %<>%
+  dplyr::filter(Event_ID != "NULL")
+
+##### start
+
+df_cancovplot <- func_processdata(canopycover, "NA") %>%
+  dplyr::group_by(Plot_Code, 
+                Start_Date, Sample_Year) %>%
+  dplyr::summarize(Canopy_Cover_Percent = mean(Canopy_Cover_Percent))
+
+df_treeplot <- Reduce(function (...) { merge(..., all = TRUE) },  # Full join
+                           list(df_treefullplot, df_seedsapplot, df_cancovplot))
+
+df_treeplot <- df_treeplot %>%
+  dplyr::mutate(Start_Date = as.character(Start_Date)) %>%
+  dplyr::select(-Sample_Year)
+
+df_treeplot <- round_df(df_treeplot, 1)
+
+df_treeplot <- df_treeplot %>%
+  dplyr::mutate(Start_Date = lubridate::ymd(Start_Date)) # %>%
+
+df_treeplot <- df_treeplot %>%
+  dplyr::rename(
+    
+    `Live Tree Basal Area <br> (m<sup>2</sup>/ha)` = Tree_BAha,
+    `Live Tree Density <br> (count/ha) ` = Tree_Countha,
+    `Dead Tree Density <br> (count/ha)` = Tree_Countdead,
+    `Seedling Density <br> (count/ha)` = Seedling_Density,
+    `Sapling Basal Area <br> (m<sup>2</sup>/ha)` = Sapling_BA,
+    `Sapling Density <br> (count/ha)` = Sapling_Density,
+    `Mean Canopy Cover <br> (%)` = Canopy_Cover_Percent,
+    `Mean Stand Height <br> (m)` = Stand_Height)
+```
+
+```{r Woody Species Tbl Observe Event}
+
+observeEvent(eventExpr = input$button_UpdateTable, {
+  
+  
+  shiny::req(!is.null(input$woodytbl_spatialunit), !is.null(df_treeplot), !is.null(input$woodytbl_userunit), !is.null(input$woodytbl_season), !is.null(input$woodytbl_year), !is.null(input$woodytbl_spatialhabitat))
+  
+  cat("Line1")
+  withProgress(message = "Just a moment", detail = "Generating table...", value = 0, {
+  
+df_wdevents <- all_events %>%
+  dplyr::filter(
+    !!as.name(input$woodytbl_spatialunit) == input$woodytbl_userunit,
+    !!as.name(input$woodytbl_season) == input$woodytbl_year) %>%
+  distinct(Event_ID) %>%
+  pull(.)
+
+rv$df_wdevents <- df_wdevents 
+
+summarise_stats <- function(data, group_col, stat_col, value) {
+  data %>%
+    dplyr::group_by(!!as.name(group_col)) %>%
+    dplyr::summarise(across(where(is.numeric), stat_col, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::mutate(Column = value, Plot_Code = ifelse(value == "Y_SD", "standard deviation", "average"))
+}
+# Define the grouping column based on condition
+group_col <- if (input$woodytbl_spatialhabitat == "All") input$woodytbl_spatialunit else input$woodytbl_spatialhabitat
+
+# Filter and join all_events
+df_woodysum <- df_treeplot %>% #hotto
+  dplyr::filter(Event_ID %in% df_wdevents) %>%
+  dplyr::left_join(all_events %>% dplyr::select(!!as.name(group_col), Plot_Code, Start_Date, Event_ID)) %>%
+  dplyr::mutate(Column = "Raw")
+
+# Generate stats (standard deviation and average)
+sdstats <- summarise_stats(df_woodysum, group_col, sd, "Y_SD")
+avgstats <- summarise_stats(df_woodysum, group_col, mean, "X_Average")
+
+# Combine and arrange final result
+df_selectedtreeplot <- df_woodysum %>%
+  dplyr::arrange(Plot_Code) %>%
+  dplyr::bind_rows(avgstats, sdstats) %>%
+  dplyr::select(!!as.name(group_col), everything()) %>%
+  dplyr::select(-c(Event_ID, Column)) %>%
+  dplyr::arrange(!!as.name(group_col))
+
+df_selectedtreeplot[[group_col]] <- ifelse(df_selectedtreeplot$Plot_Code %in% c("average", "standard deviation"), "", df_selectedtreeplot[[group_col]])
+
+rv$test <- df_selectedtreeplot
+
+rv$df_selectedtreeplot <- reactable::reactable(df_selectedtreeplot,
+                                       rowStyle = function(index) {
+    # Check if the current row corresponds to the average or standard deviation row
+    if (df_selectedtreeplot$Plot_Code[index] == "average") {
+      list(borderTop = "2px solid black", 
+           height = "20px")  # Add a line above the average row
+    } else if (df_selectedtreeplot$Plot_Code[index] == "standard deviation") {
+      list(borderBottom = "2px solid black", 
+           height = "20px")  # Add a line below the standard deviation row
+    } else {
+      NULL  
+    }
+  } ,                  
+                    highlight = TRUE,
+                     bordered = TRUE,
+                     pagination = TRUE,
+                     compact = TRUE,
+                     # resizable = TRUE,
+                     showPageSizeOptions = TRUE,
+                     filterable = TRUE,
+                     fullWidth = TRUE,
+                     defaultColDef = colDef(aggregate = "mean", 
+                                            format = colFormat(digits = 1),
+                                            html = TRUE, 
+                                            vAlign = "center",
+                                            headerVAlign = "bottom",
+                                            align = "left",
+                                            class = "group",
+                                            headerClass = "header", 
+                                            style = list(whiteSpace = "nowrap")), 
+                     columns = list(
+                       group_col = colDef(name = as.character(group_col),  minWidth = 100), 
+                       `Plot_Code` = colDef(name = "Plot", html = TRUE),
+                       `Start_Date` = colDef(name = "Survey Date"),
+                       `Live Tree Density <br> (count/ha) ` = colDef(html = TRUE),
+                       `Dead Tree Density <br> (count/ha)` = colDef(html = TRUE),
+                       `Mean Stand Height <br> (m)` = colDef(html = TRUE),
+                       `Seedling Density <br> (count/ha)`= colDef(html = TRUE),
+                       `Sapling Basal Area <br> (m<sup>2</sup>/ha)`= colDef(html = TRUE),
+                       `Sapling Density <br> (count/ha)`= colDef(html = TRUE),
+                       `Mean Canopy Cover <br> (%)` = colDef(html = TRUE)
+                      
+                     ))
+
+})
+})
+
+observe({
+  shiny::req(!is.null(trees), !is.null(rv$df_wdevents))
+
+    datatreetbl <- trees %>%
+      dplyr::select(Plot_Code, Start_Date, Event_ID, Module, Tree_Number, Plant_Code, DBH) %>%
+      dplyr::mutate(Event_ID = as.character(Event_ID)) %>%
+      dplyr::filter(Event_ID %in% rv$df_wdevents)
+
+  rv$datatreetbl <- datatreetbl
+
+})
+
+observe({
+  shiny::req(!is.null(seedlingsapling), !is.null(rv$df_wdevents))
+
+    dataseedsaptbl <- seedlingsapling %>%
+      dplyr::mutate(Event_ID = as.character(Event_ID)) %>%
+      dplyr::filter(Event_ID %in% rv$df_wdevents)
+
+  rv$dataseedsaptbl <- dataseedsaptbl
+
+})
+
+
+```
+
+```{r Woody Species Map Process 1}
+df_treedivsum <- df_trees %>% #----------Summing basal area per growth form, year, plot, and subunit 
+  dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Growth_Form) %>%
+  dplyr::summarise(Sum = sum(BA_ha)) %>%
+  tidyr::pivot_longer(cols = Sum, 
+                      names_to = "Plant_Code", 
+                      values_to = "Count")
+
+df_treediv <- df_trees %>% 
+  dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Plant_Code, Growth_Form) %>%
+  dplyr::summarize(Count = n()) %>%
+  ungroup() %>%
+  full_join(df_treedivsum)
+
+
+df_mapsapdiv <- func_seedsap(df_seedsap %>% dplyr::mutate(Growth_Form = "Sapling"), "Sapling", Sapling_Total)
+
+df_mapsapsum <- df_seedsap %>%
+  dplyr::mutate(
+    Growth_Form = "Sapling",
+    Sapling01_BA =  (0.00007854 * (0.5)^2 ) * Sapling_0_1_DBH,
+    Sapling12h_BA = (0.00007854 * (1.75)^2 ) * Sapling_1_2half_DBH,
+    Sapling2h5_BA = (0.00007854 * (3.25)^2 ) * Sapling_2half_5_DBH ,
+    Sapling510_BA = (0.00007854 * (7.5)^2 ) * Sapling_5_10_DBH
+  ) %>%
+  dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Growth_Form) %>%
+  dplyr::summarise(
+    Sum = sum(Sapling01_BA, Sapling12h_BA, Sapling2h5_BA, Sapling510_BA, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  tidyr::pivot_longer(
+    cols = Sum,
+    names_to = "Plant_Code",
+    values_to = "Count"
+  )
+
+df_sapdiv <- dplyr::full_join(df_mapsapdiv, df_mapsapsum) #-------joining count and basal area calculations for saplings
+
+df_mapseeddiv <- func_seedsap(df_seedsap %>% dplyr::mutate(Growth_Form = "Seedling"), "Seedling", Seedling_Total)
+
+df_mapseedsum <- df_mapsapsum %>%
+  dplyr::mutate(Growth_Form = "Seedling", 
+                Count = 50) # so much easier lol
+
+df_seeddiv <- dplyr::full_join(df_mapseeddiv, df_mapseedsum) 
+
+
+df_spdiv <-  Reduce(function (...) { merge(..., all = TRUE) },  #full join idk why I can't just do a regular left join....
+                        list(df_treediv, df_sapdiv, df_seeddiv))
+#### end of code within the flexdashboard
+
+
+```
+
+```{r Woody Species Map Observe Event}
+# input <- list()
+# input$size_class = "Tree"
+# input$map_subunit <- "BIRT" #check
+# input$map_spgroup <- "Genus" # options are Genus and PLant Code
+# input$map_usergroup <- "Genus" # options are Genus, user group x y and z
+# input$map_season <- "Sample_Year"
+# input$map_year <- "2011"
+
+observeEvent(eventExpr = input$button_UpdateMap, {
+  shiny::req(!is.null(df_trees), !is.null(all_events), !is.null(df_spdiv),  !is.null(input$map_subunit), !is.null(input$map_year), !is.null(input$size_class), !is.null(input$map_spgroup), !is.null(input$map_usergroup)) 
+   withProgress(message = "Just a moment", detail = "Generating woody species map...", value = 0, { 
+     
+map_sequence <- all_events %>%
+  dplyr::filter(Subunit_Code == input$map_subunit) %>%
+  dplyr::filter(!!as.name(input$map_season) == input$map_year) %>%
+  pull(Event_ID)
+
+rv$map_sequence <- map_sequence
+     
+  if (input$map_spgroup == "Genus" & input$map_usergroup == "Genus") {
+
+    df_treesunits <- df_trees %>%
+      dplyr::filter(Event_ID %in% map_sequence) %>%
+      left_join(df_genus) %>%
+      dplyr::group_by(!!as.name(input$map_spgroup)) %>%    
+      dplyr::summarize(tree_obs = n()) %>%
+      ungroup() %>%
+      top_n(7, tree_obs) %>%
+      droplevels(.)
+
+woodymptop_species <- df_treesunits %>%
+                        distinct(!!as.name(input$map_spgroup)) %>%  # use !!as.name to refer to the column
+                        pull()
+
+woodymptop_species <- as.character(c(as.character(woodymptop_species), "Other", "Sum"))
+  } else {
+    
+    genus_group <- genus_grouping %>%
+      select(!!as.name(input$map_spgroup), everything())
+
+    woodymptop_species <- unique(genus_group[[input$map_spgroup]])
+
+    woodymptop_species <- as.character(c(as.character(woodymptop_species), "Other", "Sum"))
+
+    df_spdiv <- df_spdiv %>%
+      full_join(genus_grouping) %>%
+      dplyr::select(-Genus)
+
+  }
+
+spdiv <- df_spdiv %>%
+  left_join(df_genus, by = "Plant_Code") %>%
+  dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4),
+                Plant_Code = as.factor(Plant_Code)) %>%
+  dplyr::mutate(Plot_Genus = forcats::fct_other(.[[input$map_spgroup]], #works for genus genus and genus group
+                                                   keep = woodymptop_species, ### this could be an input
+                                                   other_level = 'Other')) %>%
+  dplyr::mutate(Plot_Genus = as.character(Plot_Genus)) %>%
+  dplyr::mutate(Genus = case_when(
+    Plant_Code == "Sum" ~ "Sum",
+    TRUE ~ Genus)) %>%
+  dplyr::mutate(Plot_Genus = case_when(
+    Plant_Code == "Sum" ~ "Sum",
+    TRUE ~ Plot_Genus)
+  ) %>%
+  dplyr::mutate(Plot_Genus = as.factor(Plot_Genus)) %>% 
+  dplyr::mutate(!!as.name(input$map_usergroup) := case_when(
+    Plot_Genus == "Sum" ~ "Sum", 
+    Plot_Genus == "Other" ~ "Other", 
+    TRUE ~ .[[input$map_usergroup]])) %>%
+  dplyr::group_by(Subunit_Code, Event_ID, Plot_Code, Sample_Year, Growth_Form, #Plot_Genus,
+                  !!as.name(input$map_usergroup)) %>%
+  dplyr::summarise(Count = sum(Count)) %>% ######  CHECK TO SEE IF I SHOULD ADD A NA.RM = TRUE TO GET AN ACCURATE COUNT
+  ungroup() 
+
+mp_expan <- spdiv %>%
+  dplyr::select(Subunit_Code, Event_ID, Plot_Code, Sample_Year, Growth_Form) %>%
+  distinct() %>%
+  dplyr::mutate(
+    # Dynamically create a column based on input$map_usergroup
+    !! input$map_usergroup := "Other",  
+    Count = 0  # Add 'Count' column with value 0
+  )
+
+spdiv %<>%
+  full_join(mp_expan) %>%
+  dplyr::group_by(Subunit_Code, Event_ID, Plot_Code, Sample_Year, Growth_Form, #Plot_Genus,
+                  !!as.name(input$map_usergroup)) %>%
+  dplyr::summarise(Count = sum(Count)) %>%
+  ungroup() 
+
+df_mapwide <- spdiv %>%
+  tidyr::pivot_wider(
+    names_from = input$map_usergroup, #input$map_usergroup, #Plot_Genus,
+    values_from = Count) %>%
+  dplyr::select(Subunit_Code, Event_ID, Plot_Code, Sample_Year, Growth_Form, sort(setdiff(tidyselect::peek_vars(), "Other")), Other) 
+
+rv$df_mapwide <- df_mapwide 
+
+df_mapspdiv  <- df_mapwide %>%
+  dplyr::filter(Growth_Form == input$size_class)
+
+
+df_maplocation <- location  %>% 
+  dplyr::select(-Park_Code) %>% #for some reason people want park code
+  dplyr::mutate(PlotNum = substr(Plot_Code, 5, 10)) #------ PlotNum doesn't work for all networks
+
+df_treedivmap <- left_join(df_mapspdiv, df_maplocation)
+
+df_treedivmap %<>%
+  dplyr::filter(!is.na(Latitude)) %>%
+  dplyr::filter(!is.na(Longitude)) %>%
+  replace(is.na(.), 0) %>%
+  dplyr::filter(Event_ID %in% map_sequence) %>%
+  dplyr::select(sort(names(.))) %>%
+  dplyr::select(-Other, everything()) 
+
+park_zoom <- location %>%
+  dplyr::filter(Subunit_Code == input$map_subunit)
+
+bc = leaflet::leaflet(data = mp_compboundary) %>%
+  addTiles() %>%
+  addPolygons(data = mp_compboundary, color = ~ "black")
+
+okabe_ito <- c("#0072B2", "#D55E00", "#009E73", '#99DDFF', 
+                '#332288', '#882255', '#FFAABB', "#F0E442")
+
+columns_to_include <- df_treedivmap %>%
+  dplyr::select(-c(Subunit_Code, Event_ID, Growth_Form, Plot_Code, PlotNum, Sample_Year, Latitude, Longitude, Sum)) %>%
+  # -Other, sort(tidyselect::peak(vars())))
+  dplyr::select(Other, everything()) %>%
+  colnames()
+
+rv$columns_to_include <- columns_to_include 
+
+color_palette <- okabe_ito[1:length(columns_to_include)]
+
+color_palette[length(color_palette)] <- "#333333"
+
+rv$color_palette <- color_palette
+# color_palette
+
+bc <- bc %>%
+    addCircleMarkers(data = df_treedivmap,
+               lng = ~Longitude,
+               lat = ~Latitude,
+               labelOptions = labelOptions(noHide = F),
+               layerId = ~Plot_Code,
+               group = "Markers"
+    ) %>%
+    addMinicharts(df_treedivmap$Longitude, #########CHANGE DATA
+                  df_treedivmap$Latitude,
+                chartdata = dplyr::select(df_treedivmap, -c(Subunit_Code, Event_ID, Growth_Form, Plot_Code, PlotNum, Sample_Year, Latitude, Longitude, Sum)),
+              
+    type = "pie",
+    width = 45,
+    col = color_palette, 
+    showLabels = F,
+    ) %>%
+  addLabelOnlyMarkers(df_maplocation$Longitude,
+                      df_maplocation$Latitude,
+                      label =  df_maplocation$PlotNum,
+                      labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T, style=list('color'="#000000", 'fontSize'="18px"))) %>%
+    addScaleBar(position = "bottomright") %>%
+  fitBounds(min(park_zoom$Longitude), min(park_zoom$Latitude), max(park_zoom$Longitude), max(park_zoom$Latitude)) %>%
+    addLayersControl(
+      overlayGroups = c("Markers"), 
+      options = layersControlOptions(collapsed = FALSE)
+
+    )
+
+cat("Line4")
+
+ rv$bc <- bc
+
+
+# 
+})
+})
+  
+click_marker <- eventReactive(input$leaflet_marker_click, {
+
+
+ site <- input$leaflet_marker_click
+
+ return(site$id)
+ 
+cat("line1453")
+})
+
+
+observe({
+  shiny::req(!is.null(click_marker), !is.null(rv$df_mapwide), !is.null(rv$color_palette), !is.null(rv$columns_to_include), !is.null(rv$map_sequence), !is.null(input$map_season))
+ 
+  
+  cat("line13")
+chartdata_long <- rv$df_mapwide %>%
+   dplyr::filter(Plot_Code == click_marker(), #"COWP013", ########## SHOULD BE click_marker(), ,#
+                Event_ID %in% rv$map_sequence) %>%
+  dplyr::select(Plot_Code, Event_ID, Sample_Year, Growth_Form, all_of(rv$columns_to_include)) %>%
+  tidyr::pivot_longer(cols = all_of(rv$columns_to_include), 
+                      names_to = "Plot_Genus", 
+                      values_to = "Count") %>%
+  replace(is.na(.), 0)
+
+
+columns_to_include2 <- c(setdiff(rv$columns_to_include, "Other"), "Other")
+
+print(columns_to_include2)
+
+# rv$color_palette
+
+nn <- setNames(rv$color_palette, columns_to_include2)
+ 
+cat("line14")
+colors <- columns_to_include2
+  
+chartdata_long$Plot_Genus <- factor(chartdata_long$Plot_Genus, levels = columns_to_include2)
+
+# Check the levels to confirm the order
+levels(chartdata_long$Plot_Genus)
+  
+rv$df_spdivbar <- chartdata_long %>%
+  dplyr::filter(Plot_Code == click_marker(), 
+                Event_ID %in% rv$map_sequence) %>%
+  ggplot(aes(x = Growth_Form, y = Count, fill = Plot_Genus)) +
+  geom_bar(width = 0.45, 
+           position = "fill",
+           stat = "identity") +
+  theme_clean() +
+  labs(title = paste0(click_marker(), ", ",input$map_year), x = "", y = "") +
+  scale_x_discrete(limits = positions) +
+    scale_fill_manual(values = nn[colors],
+                      drop = TRUE) 
+
+cat("line153")
+})
+
+
+observe({ #used to be renderUI
+  shiny::req(!is.null(rv$df_mapwide), !is.null(click_marker), !is.null(rv$map_sequence))
+
+divtable <- rv$df_mapwide %>% #df_treedivtbl %>%
+    dplyr::select(-Sum) %>%
+    dplyr::filter(
+      Event_ID %in% rv$map_sequence,
+      Plot_Code == click_marker()
+      )
+
+  cat("Line44")
+
+  rv$divtable <- divtable
+
+  cat("Line44 divtable structure: ", str(rv$divtable))
+
+})
+
+observe({ 
+  shiny::req(!is.null(trees), !is.null(seedlingsapling), !is.null(click_marker), !is.null(rv$map_sequence), !is.null(input$size_class))
+  
+  if (input$size_class == "Tree") {
+    data <- trees %>%
+    dplyr::select(Plot_Code, Start_Date, Event_ID, Module, Tree_Number, Plant_Code, DBH)
+  } else {
+    data <- seedlingsapling
+  }
+
+  filtertrees <- data %>%
+    # dplyr::select(Plot_Code, Start_Date, Event_ID, Module, Tree_Number, Plant_Code, DBH) %>%
+    dplyr::filter(
+      Event_ID %in% rv$map_sequence,
+      Plot_Code == click_marker()
+      )
+
+  rv$divtabl <- filtertrees
+
+})
+
+```
+
+
+
+
+Woody Species Maps
+=======================================================================
+### <font style="font-size: 20px"> Mapped Proportion of Woody Species </font>
+
+*<font size="3"> This map shows pie charts of genera for each plot containing data in a given year and park subunit.  * </font>
+*<font size="3"> De-select "marker' and select "marker" again to be able to click on a plot and see the corresponding proportional stacked bar chart. In order to see the raw numbers on the plot, unselect "marker" and click on the pie chart itself. * </font>
+*<font size="3"> The top 8 genera are shown for TREES (in a given year and park subunit) in each bar chart and other genera are binned as "other". *</font>
+*<font size="3"> Seedling, sapling, and tree densities are NOT yet calculated at the count/ha scale (do you want the raw counts per plot or do you want them converted to count/ha?)----- ". *</font>
+
+####
+
+```{r}
+#---------Needs to change to incorportate Cycle/Year, Subunit/Park, and Different Genus Groupings
+
+div(
+  style = "display: flex; flex-wrap: wrap;",
+  
+div(style = "margin-top: 10px; margin-right: 30px; align-self: center; ",
+    actionButton("button_UpdateMap", "Update Map")
+   ), 
+  
+  div(style = "margin-top: 10px;", 
+    
+    renderUI({
+    shiny::req(!is.null(location))
+    
+  selectInput(
+    "map_subunit",
+    label = strong("Select a Unit: "),
+    choices = sort(unique(location$Subunit_Code)),
+    selected = switch(is.null(input$map_subunit)+1, input$map_subunit, "BIRT")
+    )
+})
+),
+
+
+div(style = "margin-top: 10px;", 
+    
+    renderUI({
+      shiny::req(!is.null(all_events))
+      if ("Cycle" %in% names(all_events)) {
+        conditionalPanel(
+    condition = "(Cycle %in% names(all_events))",
+    selectInput("map_season", 
+                label = strong("Select Temporal Grouping:"), 
+                choices = c("Sample_Year", "Cycle") ))
+    
+    } else {
+      selectInput("map_season", 
+                label = strong("Select Temporal Grouping:"), 
+                choices = c("Sample_Year"), 
+                selected = "sample_Year")
+      
+      }
+    })
+    ),
+
+div(style = "margin-top: 10px;", 
+    renderUI({
+      shiny::req(!is.null(all_events), !is.null(input$map_subunit), !is.null(input$map_season))
+   
+      yearchoice <- all_events %>%
+        dplyr::filter(Subunit_Code == input$map_subunit) %>%
+        distinct(!!as.name(input$map_season)) %>%
+        pull(.)
+      
+      selectInput(
+        "map_year", 
+        label = strong("Select", paste0(input$map_season), ":"), 
+        choices = sort(yearchoice),
+        selected = min(as.numeric(as.character(yearchoice)), na.rm = TRUE)
+        )
+      })
+
+),
+
+div(style = "margin-top: 10px;", 
+       renderUI({ 
+         shiny::req(!is.null(df_trees))
+         selectInput(
+           "size_class", 
+           label = strong("Select a size class: "), 
+           choices = c("Tree", "Sapling", "Seedling"), 
+           selected = "Tree"
+           )
+         })
+       ), 
+
+
+# UI for map_spgroup input
+div(style = "margin-top: 10px;",
+    
+   renderUI({
+    if (!exists("genus_grouping") || is.null(genus_grouping)) {      # If `genus_grouping` exists and is not null
+      
+      selectInput(
+        "map_usergroup",
+        label = strong("Select a species grouping:"),
+        choices = "Genus",                    # Default value if null
+        selected = "Genus"
+      )
+
+    } else {
+      # If `genus_grouping` is null
+
+      genuscols <- colnames(genus_grouping)  # Get the column names
+      genuscols <- setdiff(genuscols, "Plant_Code")
+
+      selectInput(
+        "map_usergroup",
+        label = strong("Select a species grouping:"),
+        choices = sort(genuscols),            # Provide the sorted column names
+        selected = "Genus"
+      )
+    }
+  })
+),
+
+div(style = "margin-top: 10px;",
+   renderUI({
+   shiny::req(!is.null(input$map_usergroup))
+      
+      if (input$map_usergroup == "Genus") {
+      
+      selectInput(
+        "map_spgroup",
+        label = strong("Select a taxanomic grouping: "),
+        choices = c("Genus"),
+        selected = "Genus"
+        
+      ) } else {
+    
+         selectInput(
+        "map_spgroup",
+        label = strong("Select a taxanomic grouping: "),
+        choices = c("Species" = "Plant_Code"),
+        selected = "Plant_Code")
+  }
+})
+
+)
+)
+```
+
+
+Rows
+-----------------------------------------------------------------------
+###
+```{r CUPN map}
+output$leaflet <- renderLeaflet({
+  shiny::req(!is.null(rv$bc)) 
+  rv$bc
+  })
+
+leafletOutput("leaflet", height = "95vh")
+
+```
+
+###
+
+```{r}
+
+output$map_tree <- renderPlot({
+  shiny::req(!is.null(rv$df_spdivbar))
+  
+  rv$df_spdivbar})
+
+plotOutput("map_tree")
+```
+
+
+Rows {.tabset .tabset-fade data-height=250}
+-----------------------------------------------------------------------
+### Data Summary
+```{r}
+
+downloadLink("button_exportwdmapsum", label = "Download Data Summary") 
+
+
+output$maptable <- renderReactable({
+  shiny::req(!is.null(rv$divtable))
+
+
+  reactable::reactable(rv$divtable,
+                     pagination = FALSE,
+                     highlight = TRUE,
+                     # fullWidth = TRUE,
+                     # filterable = TRUE,
+                     resizable = T,
+                     compact = TRUE,
+                      defaultColDef = colDef(vAlign = "center",
+                                            headerVAlign = "bottom",
+                                            align = "left",
+                                            class = "group",
+                                            headerClass = "header",
+                                            minWidth = 65,
+                                            headerStyle = list(fontWeight = 500)
+                                            ))
+})
+
+reactableOutput("maptable")
+
+output$button_exportwdmapsum <- downloadHandler(
+    filename = function() {
+      paste0("WoodySummaryData-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$divtable, file)
+    }
+  )
+
+```
+
+### Filtered Raw Data
+```{r}
+
+downloadLink("button_exportwdmapfilter", label = "Download Filtered Data") 
+
+# div(style = c("width: 100%;", "height: 95%;"),
+
+
+output$maptable1 <- renderReactable({
+  shiny::req(!is.null(rv$divtabl))
+
+  reactable::reactable(rv$divtabl,
+                     pagination = FALSE,
+                     highlight = TRUE,
+                     # fullWidth = TRUE,
+                     # filterable = TRUE,
+                     resizable = T,
+                     compact = TRUE,
+                      defaultColDef = colDef(vAlign = "center",
+                                            headerVAlign = "bottom",
+                                            align = "left",
+                                            class = "group",
+                                            headerClass = "header",
+                                            minWidth = 70,
+                                            headerStyle = list(fontWeight = 500)
+                                            )
+                     )
+})
+
+reactableOutput("maptable1")
+
+output$button_exportwdmapfilter <- downloadHandler(
+    filename = function() {
+      paste0("WoodyFilteredData-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$divtabl, file)
+    }
+  )
+```
+
+
+
+Sp. Native Maps {data-width=350}
+=======================================================================
+###
+
+*<font size="3"> This map shows pie charts of genera for each plot containing data in a given year and park subunit.  * </font>
+*<font size="3"> De-select "marker' and select "marker" again to be able to click on a plot and see the corresponding proportional stacked bar chart. In order to see the raw numbers on the plot, unselect "marker" and click on the pie chart itself. * </font>
+
+####
+```{r native map input, echo = FALSE}
+div(
+  style = "display: flex; flex-wrap: wrap;",
+  
+div(style = "margin-top: 10px; margin-right: 30px; align-self: center; ",
+actionButton("button_UpdateNativeTreeCompMap", "Update Map")
+), 
+
+div(style = "margin-top: 10px;", 
+
+renderUI({
+     shiny::req(!is.null(location))
+    
+  selectInput(
+    "mp_nativeunit",
+    label = strong("Select a Unit: "),
+    choices = sort(unique(location$Subunit_Code)),
+    selected = switch(is.null(input$mp_nativeunit)+1, input$mp_nativeunit, "BIRT")
+    )
+})
+), 
+
+div(style = "margin-top: 10px;", 
+    
+    renderUI({
+  shiny::req(!is.null(speciescover))
+  
+  if ("Cycle" %in% names(speciescover)) {
+    conditionalPanel(
+    condition = "(Cycle %in% names(tree_basics))",
+    selectInput("mp_nativecycle", 
+                label = strong("Select Temporal Grouping:"), 
+                choices = c("Year" = "Sample_Year", "Cycle") ))
+    
+    } else {
+      selectInput("mp_nativecycle", 
+                label = strong("Select Temporal Grouping:"), 
+                choices = c("Year" = "Sample_Year"), 
+                selected = c("Year" = "Sample_Year"))
+      }
+})
+),
+
+
+div(style = "margin-top: 10px;", 
+renderUI({
+  shiny::req(!is.null(all_events), !is.null(input$mp_nativeunit), !is.null(speciescover))
+  
+  if (input$mp_nativecycle == "Sample_Year") { 
+  
+    nativeyr <- all_events %>%
+    filter(Subunit_Code == input$mp_nativeunit) %>%
+    distinct(Sample_Year) %>%
+    pull(.)
+    
+selectInput(
+  "mp_nativeyr", 
+  label = strong("Select Year: "), 
+  choices = sort(nativeyr), 
+  selected = min(as.numeric(as.character(nativeyr)))
+) 
+  } else {
+    
+    nativecycle <- all_events %>%
+    filter(Subunit_Code == input$mp_nativeunit) %>%
+    distinct(Cycle) %>%
+    pull(.)
+    
+    selectInput(
+  "mp_nativeyr", 
+  label = strong("Select Cycle: "), 
+  choices = sort(unique(nativecycle)), 
+  selected = min(nativecycle)
+    )
+    
+  }
+})
+),
+
+div(style = "margin-top: 10px;", 
+
+renderUI({
+  shiny::req(!is.null(taxa))
+  
+  nmap_sp <- names(taxa)[! names(taxa) %in% c("Plant_Code", "Network_Scientific_Name")]
+  
+  selectInput(
+    "mp_nativegroup", 
+    label = strong("Select Species Grouping: "), 
+    choices = "Genus", 
+    selected = "Genus"
+  
+  )
+})
+)
+)
+
+```
+
+Row
+-----------------------------------------------------------------------
+###
+```{r native map 2}
+output$nativeleaflet <- renderLeaflet({
+  shiny::req(!is.null(rv$nc)) 
+  rv$nc
+  })
+
+leafletOutput("nativeleaflet", height = "95vh")
+```
+
+###
+```{r}
+
+output$nativeecleaflet <- renderLeaflet({
+  shiny::req(!is.null(rv$ec)) 
+  rv$ec
+  })
+
+leafletOutput("nativeecleaflet", height = "95vh")
+
+```
+
+Relative Prop of Genera {data-orientation=rows}
+========================================================================
+### <font style="font-size: 20px"> Relative Proportion of Woody Species </font>
+
+*<font size="3"> This graph shows the relative density of woody plant genera for a selected year, park, community group, and number of plots in this community group.* </font>
+*<font size="3"> Each bar represents a different size class of woody plant - seedling, sapling, and tree.* </font>
+*<font size="3"> The 8 genera with the highest density of trees are displayed, and with all other genera binned into an ‘Other’ category. *</font>
+
+Inputs {.sidebar data-width=300}
+-------------------------------------
+```{r}
+div(style = "margin-top: 10px; align-self: left; ",
+   actionButton("button_UpdatePlots", "Update Plots")
+
+   )
+  
+  div(style = "margin-top: 10px;", 
+    
+renderUI({   
+selectInput(
+  "stack_spatialunit",
+  label = strong("Select Spatial Scale: "),
+  choices = c("Network_Code", "Park_Code", "Subunit_Code") 
+)
+})
+)
+ 
+
+
+renderUI({ #needed bc reactive
+  shiny::req(!is.null(input$stack_spatialunit), !is.null(all_events))
+  
+  selectInput(
+    "stack_userunit",
+    label = strong(paste0("Select Individual Unit of ", input$stack_spatialunit, ":" )),
+    choices = unique(all_events[input$stack_spatialunit]) %>% pull(.) %>% sort()
+  )
+
+})
+
+
+
+renderUI({
+  shiny::req(!is.null(all_events))
+  
+  if ("Cycle" %in% names(all_events)) {
+    conditionalPanel(
+    condition = "(Cycle %in% names(all_events))",
+    selectInput("stack_season", 
+                label = strong("Select Temporal Grouping:"), 
+                choices = c("Sample_Year", "Cycle") ))
+    
+    } else {
+      selectInput("stack_season", 
+                label = strong("Select Temporal Grouping:"), 
+                choices = c("Sample_Year"), 
+                selected = "Sample_Year")
+      
+      }
+})
+
+
+          renderUI({
+      shiny::req(!is.null(all_events), !is.null(input$stack_spatialunit), !is.null(input$stack_userunit), !is.null(input$stack_season))
+   
+      yearchoice <- all_events %>%
+        dplyr::filter(!!as.name(input$stack_spatialunit) == input$stack_userunit) %>%
+        distinct(!!as.name(input$stack_season)) %>%
+        pull(.)
+      
+      selectInput(
+        "stack_year", 
+        label = strong("Select", paste0(input$stack_season), ":"), 
+        choices = sort(yearchoice),
+        selected = min(as.numeric(as.character(yearchoice)), na.rm = TRUE)
+        )
+      })
+
+          
+renderUI({
+  shiny::req(!is.null(broadgroup), !is.null(remove_habcolumns))
+  
+  habgroup <- names(broadgroup)[! names(broadgroup) %in% remove_habcolumns]
+  
+  selectInput(
+  "stack_spatialhabitat", 
+  label = strong("Select Habitat Group: "),
+  choices = c("All", sort(habgroup))
+  )
+
+})
+
+renderUI({
+     shiny::req(!is.null(input$stack_spatialunit), !is.null(input$stack_userunit), !is.null(input$stack_season), !is.null(input$stack_year), !is.null(input$stack_spatialhabitat), !is.null(all_events))
+
+  if (input$stack_spatialhabitat == "All") {
+     selectInput(
+    "stack_userhabitat",
+    label = strong("Select Habitat Grouping: "),
+    choices = c("All")
+    
+  )  } else {
+
+  communitychoice <- all_events %>%
+    dplyr::filter(!!as.name(input$stack_season) %in% input$stack_year,
+                  !!as.name(input$stack_spatialunit) == input$stack_userunit) %>%
+    distinct(!!as.name(input$stack_spatialhabitat)) %>%
+    pull(.)
+
+  selectInput(
+    "stack_userhabitat",
+    label = strong("Select Habitat Grouping: "),
+    choices = c(sort(communitychoice))
+  )
+  }
+
+})
+
+   renderUI({
+    if (!exists("genus_grouping") || is.null(genus_grouping)) {      # If `genus_grouping` exists and is not null
+      
+      selectInput(
+        "stack_usergroup",
+        label = strong("Select a species grouping:"),
+        choices = "Genus",                    # Default value if null
+        selected = "Genus"
+      )
+
+    } else {
+      # If `genus_grouping` is null
+
+      genuscols <- colnames(genus_grouping)  # Get the column names
+      genuscols <- setdiff(genuscols, "Plant_Code")
+
+      selectInput(
+        "stack_usergroup",
+        label = strong("Select a species grouping:"),
+        choices = sort(genuscols),            # Provide the sorted column names
+        selected = "Genus"
+      )
+    }
+  })
+
+    renderUI({
+   shiny::req(!is.null(input$stack_usergroup))
+      
+      if (input$stack_usergroup == "Genus") {
+      
+      selectInput(
+        "stack_spgroup",
+        label = strong("Select a taxanomic grouping: "),
+        choices = c("Genus"),
+        selected = "Genus"
+      ) } else {
+    
+         selectInput(
+        "stack_spgroup",
+        label = strong("Select a taxanomic grouping: "),
+        choices = c("Species" = "Plant_Code"),
+        selected = "Plant_Code")
+  }
+})
+     
+div(style = "margin-bottom: 30px;", 
+    
+  )
+
+```
+
+
+Rows {data-height = 925}
+-----------------------------------------------------------------------
+###
+```{r}
+output$stackplotly_tree <- renderPlotly({
+  shiny::req(!is.null(rv$plotly_tree))
+  rv$plotly_tree})
+
+plotlyOutput("stackplotly_tree", height = "70%") #, width = "50%") # width used to be 50 I don't think this changed anything
+```
+
+
+Rows {.tabset .tabset-fade data-height=200}
+-----------------------------------------------------------------------
+### Data Summary
+```{r}
+
+downloadLink("button_exportstackbarsum", label = "Download Data Summary") 
+
+output$woody_filteredtable <- renderReactable({
+  shiny::req(!is.null(rv$col_sptreefull))
+  
+  # datasum <- rv$col_sptreefull %>%
+  #   dplyr::arrange(factor(Strata, levels = positions))
+
+  reactable::reactable(rv$col_sptreefull,  #datasum,
+                       fullWidth = TRUE,
+                       compact = TRUE,
+                       # resizeable = TRUE,
+                       defaultColDef = colDef(vAlign = "center",
+                                            headerVAlign = "bottom",
+                                            align = "left",
+                                            class = "group",
+                                            minWidth = 70,
+                                            headerClass = "header")
+
+                       )
+})
+
+reactableOutput("woody_filteredtable", height = "40%")
+
+output$button_exportstackbarsum <- downloadHandler(
+    filename = function() {
+      paste0("StakedBarSummaryData-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$col_sptreefull, file, row.names = FALSE)
+    }
+  )
+
+
+# verticalLayout(plotlyOutput("plotly_tree"), reactableOutput("table_tree"))
+```
+
+### Filtered Raw Tree Data 
+```{r}
+
+downloadLink("button_exportstackbartreesum", label = "Download Data Summary") 
+
+# output$wth <- renderText({
+#   shiny::req(!is.null(rv$stack_sequence))
+#   
+#   print(rv$stack_sequence)
+# })
+# textOutput("wth")
+
+output$stack_rawtree <- renderReactable({
+  shiny::req(!is.null(rv$datatree))
+
+  reactable::reactable(rv$datatree,
+                       fullWidth = TRUE,
+                       compact = TRUE,
+                       # filterable = TRUE,
+                       defaultColDef = colDef(
+                         vAlign = "center",
+                         headerVAlign = "bottom",
+                         align = "left",
+                         class = "group",
+                         minWidth = 70,
+                         headerClass = "header"
+                         ))
+
+})
+
+reactableOutput("stack_rawtree", height = "40%")
+
+output$button_exportstackbartreesum <- downloadHandler(
+    filename = function() {
+      paste0("StakedBarSummaryData-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$datatree, file, row.names = FALSE)
+    }
+  )
+```
+
+### Filtered Raw Seedling Sapling Data
+```{r}
+
+downloadLink("button_exportstackbarseedsapsum", label = "Download Data Summary") 
+
+output$stack_rawseedsap <- renderReactable({
+  shiny::req(!is.null(rv$dataseedsap))
+
+  reactable::reactable(rv$dataseedsap,
+                       fullWidth = TRUE,
+                       compact = TRUE,
+                       # filterable = TRUE,
+                       defaultColDef = colDef(
+                         vAlign = "center",
+                         headerVAlign = "bottom",
+                         align = "left",
+                         class = "group",
+                         minWidth = 70,
+                         headerClass = "header"
+                         ))
+
+})
+
+
+reactableOutput("stack_rawseedsap", height = "40%")
+
+output$button_exportstackbarseedsapsum <- downloadHandler(
+    filename = function() {
+      paste0("StakedBarSummaryData-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$dataseedsap, file, row.names = FALSE)
+    }
+  )
+
+```
+
+
+Woody Plant Characteristics 
+=======================================================================
+
+####
+
+```{r}
+### <font style="font-size: 20px"> Woody Plant Metrics </font>
+
+# *<font size="3">This table shows woody stem abundance and canopy characteristics (height, cover) across years, park units, park subunits, and habitat. Basal area (m2) and density (stem count) are summarized at the hectare (ha) scale. * </font>
+
+div(
+  style = "display: flex; flex-wrap: wrap;",
+div(style = "margin-top: 10px; align-self: center; ", # margin-right: 30px; 
+    actionButton("button_UpdateTable", "Update Table") 
+), 
+
+div(style = "margin-top: 10px;",
+    renderUI({  
+      selectInput(
+  "woodytbl_spatialunit",
+  label = strong("Select Spatial Scale: "),
+  choices = c("Network_Code", "Park_Code", "Subunit_Code") 
+)
+}) 
+
+) , 
+
+div(style = "margin-top: 10px;",
+renderUI({ #needed bc reactive
+  shiny::req(!is.null(input$woodytbl_spatialunit), !is.null(all_events))
+  
+  selectInput(
+    "woodytbl_userunit",
+    label = strong(paste0("Select Individual Unit of ", input$woodytbl_spatialunit, ":" )),
+    choices = unique(all_events[input$woodytbl_spatialunit]) %>% pull(.) %>% sort()
+  )
+
+})
+) ,  
+
+div(style = "margin-top: 10px;",
+renderUI({
+  shiny::req(!is.null(all_events))
+  
+  if ("Cycle" %in% names(all_events)) {
+    # conditionalPanel(
+    # condition = "(Cycle %in% names(all_events)",
+    selectInput("woodytbl_season", 
+                label = strong("Select Temporal Grouping:"), 
+                choices = c("Sample_Year", "Cycle") )
+    
+    } else {
+      selectInput("woodytbl_season", 
+                label = strong("Select Temporal Grouping:"), 
+                choices = c("Sample_Year"), 
+                selected = "Sample_Year")
+      
+      }
+})
+
+),  
+
+div(style = "margin-top: 10px;", 
+    renderUI({
+      shiny::req(!is.null(all_events), !is.null(input$woodytbl_spatialunit), !is.null(input$woodytbl_userunit), !is.null(input$woodytbl_season))
+   
+      yearchoice <- all_events %>%
+        dplyr::filter(!!as.name(input$woodytbl_spatialunit) == input$woodytbl_userunit) %>%
+        distinct(!!as.name(input$woodytbl_season)) %>%
+        pull(.)
+      
+      selectInput(
+        "woodytbl_year", 
+        label = strong("Select", paste0(input$woodytbl_season), ":"), 
+        choices = sort(yearchoice),
+        selected = min(as.numeric(as.character(yearchoice)), na.rm = TRUE)
+        )
+      })
+
+), 
+
+div(style = "margin-top: 10px;",
+
+renderUI({
+  shiny::req(!is.null(broadgroup), !is.null(remove_habcolumns))
+  
+  habgroup <- names(broadgroup)[! names(broadgroup) %in% remove_habcolumns]
+  
+  selectInput(
+  "woodytbl_spatialhabitat", 
+  label = strong("Select Habitat Group: "),
+  choices = c("All", sort(habgroup))
+  )
+
+})
+)
+)
+
+
+```
+
+Row {.tabset .tabset-fade}
+-------------------------------------
+### Woody Plant Characteristics
+```{r}
+
+downloadLink("button_exportWoodyStemTable", label = "Export Woody Table Filtered Data")
+
+output$seedsapplot <- renderReactable({
+  shiny::req(!is.null(rv$df_selectedtreeplot))
+  
+  rv$df_selectedtreeplot
+  
+})
+
+div(style = "width: 100%;", 
+    reactableOutput("seedsapplot"))
+
+output$button_exportWoodyStemTable <- downloadHandler(
+    filename = function() {
+      paste0("data-", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      shiny::req(!is.null(rv$test))
+      write.csv(rv$test, file, row.names = FALSE) # add row.names = FALSE
+    }
+)
+
+
+```
+
+### Filtered Raw Tree Data
+```{r}
+downloadLink("button_exporttreetbl", label = "Download Filtered Tree CSV") 
+
+output$woody_rawtreetbl <- renderReactable({
+  shiny::req(!is.null(rv$datatreetbl))
+
+  reactable::reactable(rv$datatreetbl,
+                       fullWidth = TRUE,
+                       compact = TRUE,
+                       # filterable = TRUE,
+                       defaultColDef = colDef(
+                         vAlign = "center",
+                         headerVAlign = "bottom",
+                         align = "left",
+                         class = "group",
+                         minWidth = 70,
+                         headerClass = "header"
+                         ))
+
+})
+
+
+reactableOutput("woody_rawtreetbl", height = "40%")
+
+output$button_exporttreetbl <- downloadHandler(
+    filename = function() {
+      paste0("TreeFilteredData-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$datatreetbl, file, row.names = FALSE)
+    }
+  )
+
+```
+
+### Filtered Raw Seedling and Sapling Data
+```{r}
+
+downloadLink("button_exportseedsaptbl", label = "Download Filtered Seedling and Sapling CSV") 
+
+output$woody_rawseedsap <- renderReactable({
+  shiny::req(!is.null(rv$dataseedsaptbl))
+
+  reactable::reactable(rv$dataseedsaptbl,
+                       fullWidth = TRUE,
+                       compact = TRUE,
+                       # filterable = TRUE,
+                       defaultColDef = colDef(
+                         vAlign = "center",
+                         headerVAlign = "bottom",
+                         align = "left",
+                         class = "group",
+                         minWidth = 70,
+                         headerClass = "header", 
+                         style = list(whiteSpace = "nowrap")) # new new 12/24
+                         )
+
+})
+
+
+reactableOutput("woody_rawseedsap", height = "40%")
+
+output$button_exportseedsaptbl <- downloadHandler(
+    filename = function() {
+      paste0("SeedSapFilteredData-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$dataseedsaptbl, file, row.names = FALSE)
+    }
+  )
+```
+
+
+```{css styles}
+
+.border-left {
+  border-left: 14px solid #000;
+  font-size: 12px
+}
+
+.header { 
+  border-bottom-color: #555;
+  border-top-color: #555;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.group {
+  font-size: 12px;
+}
+
+.reactable {
+font-size: 12px; 
+}
+
+.cell {
+  font-size: 12px;
+
+}
+
+.cellitalics {
+  font-style: italic;
+}
+```
+
