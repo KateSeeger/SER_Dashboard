@@ -1,0 +1,814 @@
+---
+title: "NativeMap_Flex2424"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll 
+    runtime:: shiny
+---
+```{r include = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+rm(list=ls())
+
+
+#options(url.method = "wininet")
+#options(repos="http://cran.revolutionanalytics.com")
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+### Load libraries -----
+# Will automatically install any libraries it can't find
+pkgs <- c("flexdashboard", 
+              "shiny", 
+              "knitr", 
+              "odbc", # pull data from SQL server
+              "leaflet", 
+              "here",
+              "plotly", 
+              "tidyverse", 
+              "plyr", 
+              "sf",
+              "readr",
+              "magrittr",
+              "bslib", 
+              "ggplot2",
+              "patchwork",
+              "leaflet.extras", 
+              "leaflet.extras2",
+              "lubridate",
+              "forcats",
+              "httr", # use web services
+              # "rgdal", # to use readOGR
+              "sp", # transform projections
+              "purrr", # for applying functions to dplyr groups
+              "dataMaid", # for data checks
+              "shinyFiles", # for user to save files in specified location
+              "RColorBrewer", # to display brewer palettes
+              "shinyjs", # for easy functions that use JavaScript
+              "stringr", # to detect text snippets
+              "reactable",
+              "reactablefmtr",
+              "base", 
+              "htmltools", 
+              "htmlwidgets",
+              "ggthemes",
+              "data.table", # for fast lag calcs
+              "DT", # for interactive tables
+              "cowplot", # to get legends from plots
+              "crosstalk", # for SharedData
+              "gridExtra", # for arranging plots and adding plot annotations (ggplotly can't do captions or subtitles)
+              "RgoogleMaps", # for MaxZoom & MinZoom
+              "leaflet.minicharts") # for pie charts in leaflet maps
+
+
+installed_pkgs <- pkgs %in% installed.packages()
+if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE) 
+lapply(pkgs, library, character.only = TRUE)
+
+invisible(lapply(pkgs, library, character.only = TRUE))
+
+options(shiny.maxRequestSize=60*1024^2) #increase the file upload limit to 90MB.
+
+rv <- reactiveValues(SeedlingSapling = NULL, SpeciesDiversity = NULL, Tree = NULL, CanopyCover = NULL, StandHeight = NULL, Genus = NULL, LatLong = NULL, Species_Cover = NULL, Cover_Class = NULL, Exotics = NULL, CWD = NULL, BroadGroup = NULL, CycleNumber = NULL)
+
+temp_rv <- shiny::reactiveValues(
+  df_mapwide = NULL, 
+  columns_to_include = NULL,
+  color_palette = NULL, 
+  bc = NULL, 
+  ec = NULL, 
+  nc = NULL,
+  map_nativesequence = NULL
+)
+```
+
+```{r message = FALSE, results = FALSE, echo = FALSE}
+#reading in csvs
+# 
+# trees <- read_csv(here::here("output", "CUPN_TreeBasics.csv")) #NEWNEW cycle tree basics
+# seedlingsapling <- read_csv(here::here("output", "CUPN_SeedlingSapling.csv")) #NEWNEW cycle seedling sapling
+# broadgroup <- read_csv(here::here("output", "CUPN_BroadGroup.csv")) #used to be broadgroup
+# speciesrich <- read_csv(here::here("output", "CUPN_SpeciesDiversity.csv"))
+# location <- read_csv(here::here("output", "Location_Table2.csv")) #let's just call this LOCATION
+# canopycover <- read_csv(here::here("output", "CUPN_CanopyCover.csv"))
+# genus_group <- read_csv(here::here("output", "Genus_grouping.csv"))
+# events <- read_csv(here::here("output", "CUPN_EventTable2.csv"))
+# shapefile <- st_read(here::here('./cupn_shapefile/CUPN.shp'))
+# speciescover <- read_csv(here::here("output", "CUPN_SpeciesCover.csv"))
+# taxa <- read_csv(here::here("output", "TaxaTable.csv"))
+# coverclass <- read_csv(here::here("output", "CoverClass.csv"))
+```
+
+```{r message = FALSE, results = FALSE, echo = FALSE}
+# # JavaScript file for leaflet-easyPrint
+# jsfile <- "https://rawgit.com/rowanwins/leaflet-easyPrint/gh-pages/dist/bundle.js" 
+# 
+# # Create a UI output
+# leafletOutput("map", height = "600px")
+# tags$head(tags$script(src = jsfile))
+# 
+# 
+# mp_compboundary <- st_transform(shapefile, crs = 4326)
+
+```
+
+
+```{r}
+
+# Define the folder path where the files are located
+folder_path <- here::here("output")  # Modify this as needed
+
+# General function to load data files based on a keyword
+load_data_by_keyword <- function(folder_path, keyword) {
+  # List all CSV files in the folder
+  files <- list.files(path = folder_path, pattern = "\\.csv$", full.names = TRUE)
+  
+  # Filter files that contain the specified keyword in the name
+  matched_files <- files[grepl(keyword, files, ignore.case = TRUE)]
+  
+  # If there's at least one matching file, load the first one
+  if (length(matched_files) > 0) {
+    message(paste("Loading file:", matched_files[1]))  # For logging purposes
+    return(read_csv(matched_files[1]))  # Read the first matching file
+  } else {
+    message(paste("No files containing '", keyword, "' found in the folder.", sep = ""))
+    return(NULL)  # Return NULL if no matching file is found
+  }
+}
+
+# Load data for different categories using the general function
+trees <- load_data_by_keyword(folder_path, "tree")
+location <- load_data_by_keyword(folder_path, "location")
+broadgroup <- load_data_by_keyword(folder_path, "broadgroup")
+speciesrich <- load_data_by_keyword(folder_path, "speciesdiversity")
+# genus <- load_data_by_keyword(folder_path, "genus_grouping")
+canopycover <- load_data_by_keyword(folder_path, "canopycover")
+taxa <- load_data_by_keyword(folder_path, "taxa")
+events <- load_data_by_keyword(folder_path, "event")
+seedlingsapling <- load_data_by_keyword(folder_path, "seedlingsapling")
+# speciescover <- load_data_by_keyword(folder_path, "speciescover")
+coverclass <- load_data_by_keyword(folder_path, "coverclass")
+genus_group <- load_data_by_keyword(folder_path, "genus_grouping")
+```
+
+```{r message = FALSE, results = FALSE, echo = FALSE}
+# 
+# shapefile <- st_read(here::here('./cupn_shapefile/CUPN.shp'))
+# mp_compboundary <- st_transform(shapefile, crs = 4326)
+shapefile <- st_read(here::here("cupnguln_shapefile/cupn_shapefile/CUPN.shp"))
+mp_compboundary <- st_transform(shapefile, crs = 4326)
+
+```
+
+
+```{r functions}
+### Functions-----
+
+#rounding function 
+#stick to a certain function naming rule
+round_df <- function(x, digits) {
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x
+}
+
+options(scipen=999)
+
+#keeping only first letter of character
+makeInitials <- function(charVec) {
+  make.unique(vapply(strsplit(toupper(charVec), " "), 
+                     function(x) paste(substr(x, 1, 1), collapse = ""), 
+                     vector("character", 1L)))
+}
+
+#color palettes
+Okabe_Ito <- c("#E69F00", "#56B4E9", "#009E73", '#CC6677',"#F0E442", "#0072B2", "#D55E00", 
+               "#CC79A7", "#000000",'#DDDDDD', '#EE6678', '#99DDFF', 
+               '#BBCC33', '#332288', '#882255', '#FFAABB')
+
+okabe_ito <- c( "#0072B2", "#D55E00", 
+               "#CC79A7", "#000000",  '#CC6677', '#BBCC33', '#99DDFF', 
+                '#332288', '#882255', '#FFAABB', "#E69F00", "#56B4E9", "#009E73", "#F0E442")
+
+viridis <- c("#fde725", "#5ec962", "#21918c","#3b528b","#440154")
+
+jane <- c('#a5cee2', '#1f78b4', '#b2df8a', '#e7298b', '#33a02b', '#997dd4', '#000000', '#fc9a99','#e21a1c', '#fdbe6f', '#ff7f00', '#9c9c9c', '#cab2d6', '#6a3d9a', '#feff99', '#b15929')
+
+# function to group by a plot, year and find the count of n
+makefun <- function(data) {
+  data %>% 
+  dplyr::group_by(Plot_Code, Sample_Year) %>%
+  dplyr::summarize(n())
+  
+}
+
+check_identical_columns <- function(data) { ### newnewnew 2025
+  # Get all combinations of column pairs
+  col_pairs <- combn(names(data), 2, simplify = FALSE)
+  
+  # Check if any pair of columns is identical
+  any_identical <- col_pairs %>%
+    purrr::map_lgl(~ all(data[[.x[1]]] == data[[.x[2]]])) %>%
+    any()
+  
+  return(any_identical)
+}
+
+##### css functions
+integer_columns <- function(maxWidth = 60, ...) {
+  colDef(maxWidth = maxWidth, align = "center",...)
+}
+
+with_tooltip <- function(value, tooltip) {
+  tags$abbr(style = "text-decoration: underline; text-decoration-style: dotted; cursor: help", title = tooltip, value)
+}
+
+# lists for organizing column orders
+positions <- c("Tree", "Sapling", "Seedling")
+
+col_group <- c("Plot_Code", "Plant_Code", "Start_Date", "Sample_Year", "Event_ID")
+
+#Needs to get ride of Network, Park, and Subunit, Change Start_Date to Sample Date?
+common_columns <- c("Network_Code", "Park_Code", "Subunit_Code", "Plot_Code", "Start_Date", "Event_Type_Name", "Sample_Year") 
+
+remove_habcolumns <- c("Fit", "Confidence", "Sample_Year", "Event_ID", "Start_Date", "Plot_Code") 
+```
+
+```{r}
+# func_processdata <- function(df, growth_form) {
+#   df %>%
+#     dplyr::mutate(Start_Date = as.Date(lubridate::mdy_hm(Start_Date)),
+#                   Sample_Year = as.factor(Sample_Year),
+#                   Growth_Form = growth_form) # %>%
+#     #as.data.frame()#
+# }
+# 
+# 
+# func_seedsap <- function(df, form_col, total_col) {
+#   df %>%
+#     replace(is.na(.), 0) %>%
+#     dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Plant_Code, Growth_Form = form_col) %>%
+#     dplyr::summarise(Count = sum({{total_col}}, na.rm = TRUE)) %>%
+#     ungroup()
+# }
+
+```
+
+```{r}
+
+# df_genus <- taxa %>% 
+#   dplyr::select(Plant_Code, Genus) 
+# 
+# broadgroup <- func_processdata(broadgroup, NA)
+# 
+# df_events <- func_processdata(events, NA)
+# 
+# all_events <- df_events %>%
+#   left_join(broadgroup) %>%
+#   dplyr::filter(Event_Type != "QA/QC")%>%
+#   left_join(location %>% dplyr::select(Network_Code, Park_Code, Subunit_Code, Plot_Code), by = "Plot_Code")
+# 
+# df_trees <- func_processdata(trees, "Tree") %>%
+#   dplyr::filter(Status_Name == "Live Tree") %>%
+#   dplyr::mutate(BA_ha = ((pi * DBH^2) / 40000) / 0.04)
+# 
+# df_seedsap <- func_processdata(seedlingsapling, NA)
+# 
+#  # new code for woody map _flex24
+# location %<>%
+#     dplyr::select(Park_Code, Subunit_Code, Plot_Code, Latitude, Longitude)
+# 
+# genus_grouping <-  if (!exists("genus_group")) {
+#   genus_grouping <- NULL
+#   } else { 
+#   genus_grouping <- genus_group
+#   }
+
+```
+
+
+```{r}
+#newnewnew
+func_processdata <- function(df, growth_form) {
+  # Check if the data matches the mdy_hm format (month-day-year hour:minute)
+  if (all(!is.na(lubridate::mdy_hm(df$Start_Date, quiet = TRUE)))) {
+    df <- df %>%
+      dplyr::mutate(Start_Date = as.Date(lubridate::mdy_hm(Start_Date)))
+  } else  {
+    df <- df %>%
+      dplyr::mutate(Start_Date = as.Date(lubridate::mdy(Start_Date)))
+  } 
+
+  # (all(!is.na(lubridate::mdy(df$Start_Date, quiet = TRUE)))) #newnewnew
+  # else {
+  #   stop("Unable to parse Start_Date. Ensure the format is either 'mdy' or 'mdy_hm' and consistent.")
+  # }
+
+  # Apply the rest of the transformations
+  df %>%
+    dplyr::mutate(
+      Sample_Year = as.factor(Sample_Year),
+      Growth_Form = growth_form
+    )
+}
+
+#newnewnew
+# func_processdata <- function(df, growth_form) {
+#   # Check if the data matches the mdy_hm format (month-day-year hour:minute)
+#   if (all(!is.na(lubridate::mdy_hm(df$Start_Date, quiet = TRUE)))) {
+#     df <- df %>%
+#       dplyr::mutate(Start_Date = as.Date(lubridate::mdy_hm(Start_Date)))
+#   } else if (all(!is.na(lubridate::mdy(df$Start_Date, quiet = TRUE)))) {
+#     df <- df %>%
+#       dplyr::mutate(Start_Date = as.Date(lubridate::mdy(Start_Date)))  ### updatenewnewnew
+#   } else {
+#     stop("Unable to parse Start_Date. Ensure the format is either 'mdy' or 'mdy_hm' and consistent.")
+#   }
+# 
+#   # Apply the rest of the transformations
+#   df %>%
+#     dplyr::mutate(
+#       Sample_Year = as.factor(Sample_Year),
+#       Growth_Form = growth_form
+#     )
+# }
+func_seedsap <- function(df, form_col, total_col) {
+  df %>%
+    replace(is.na(.), 0) %>%
+    dplyr::group_by(Plot_Code, Start_Date, Event_ID, Sample_Year, Plant_Code, Growth_Form = form_col) %>%
+    dplyr::summarise(Count = sum({{total_col}}, na.rm = TRUE)) %>%
+    ungroup()
+}
+
+
+```
+
+```{r}
+
+df_genus <- taxa %>% 
+  dplyr::select(Plant_Code, Genus) 
+
+broadgroup <- func_processdata(broadgroup, NA)
+
+df_events <- func_processdata(events, NA)
+
+all_events <- df_events %>%
+  left_join(broadgroup) %>%
+  {
+    # Check if Event_Type exists in the dataframe
+    if ("Event_Type" %in% names(.)) {
+      dplyr::filter(., Event_Type != "QA/QC")
+    } else {
+      .
+    }
+  } %>%
+  left_join(location %>% dplyr::select(Network_Code, Park_Code, Subunit_Code, Plot_Code), by = "Plot_Code")
+
+
+df_trees <- func_processdata(trees, "Tree") %>%
+  dplyr::filter(str_detect(tolower(Status_Name), "live")) %>%  # Case-insensitive match for "live"
+  dplyr::mutate(BA_ha = ((pi * DBH^2) / 40000) / 0.04)
+
+df_seedsap <- func_processdata(seedlingsapling, NA)
+
+location %<>%
+    dplyr::select(Park_Code, Subunit_Code, Plot_Code, Latitude, Longitude)
+
+genus_grouping <-  if (!exists("genus_group")) {
+  genus_grouping <- NULL
+  } else { 
+  genus_grouping <- genus_group
+  }
+
+```
+
+
+
+```{r}
+#list of high priority species 
+nonnative_hp <- taxa %>%
+  dplyr::filter(Flag_High_Priority_Exotic == "High") %>%
+  pull(Plant_Code)
+
+# tt <- read_csv("outputCUPN2024/TaxaTable.csv")
+nonnative <- taxa %>%
+  dplyr::filter(grepl("Non", Nativity)) #newnewnew 2025
+
+df_speciesrich <- if (check_identical_columns(taxa) == FALSE) { ### newnewnew
+  speciesrich %>%
+    left_join(select(taxa, Plant_Code, Network_Scientific_Name, Nativity, Genus, Growth_Form, Flag_High_Priority_Exotic), by = "Plant_Code")
+} else {
+  speciesrich %>% 
+    left_join(select(taxa, Plant_Code, Network_Scientific_Name, Nativity, Genus, Growth_Form, Flag_High_Priority_Exotic),  by = c("Plant_Code", "Network_Scientific_Name"), relationship = "many-to-many")
+}
+
+species_exotics <- df_speciesrich %>% #newnewnew 2025
+  dplyr::filter(grepl("Non", Nativity)) %>%
+  # dplyr::filter(Nativity == "Non-Native") %>% 
+  dplyr::mutate(Flag_High_Priority_Exotic = replace_na(Flag_High_Priority_Exotic, "Low"))
+
+```
+
+
+```{r Nativity Map Observe Event} 
+##########################   THIS CODE IS NOT COMPATIBLE WITH CYCLE CHANGGGEEEEE
+observeEvent(eventExpr = input$button_UpdateNativeTreeCompMap, {
+  shiny::req(!is.null(input$mp_nativeunit), !is.null(input$mp_nativeyr), !is.null(mp_compboundary), !is.null(location), !is.null(df_speciesrich), !is.null(taxa), !is.null(input$mp_nativegroup), !is.null(species_exotics), !is.null(input$mp_nativecycle), !is.null(all_events))
+  
+# input values
+# input <- list()
+# input$mp_nativeunit <- "Beech Creek"
+# input$mp_nativeyr <- "2022"
+# input$mp_nativegroup <- "Genus"
+# input$mp_nativecycle <- "Sample_Year"
+  cat("Line1")
+  withProgress(message = "Just a moment", detail = "Generating native species maps...", value = 0, {
+  
+nmap_spgroup <- input$mp_nativegroup
+
+# constancy_native <- speciescover %>%
+#   dplyr::left_join(select(taxa, Plant_Code, Genus)) %>%
+#     dplyr::select(Plot_Code, Start_Date, Plant_Code, !!as.name(nmap_spgroup), Cover_Class, !!as.name(input$mp_nativecycle)) 
+
+
+df_complatlong <- location %>% 
+  dplyr::select(-Park_Code) %>% #for some reason people want park code hmm can't do that for mapping smh
+  dplyr::mutate(Plot_Num = substr(Plot_Code, 5, 10))
+
+species_exoticsnum <- df_speciesrich %>%
+  dplyr::filter(Sample_Depth_Code != "0", ## newnewnew 2024
+                grepl("Native" , Nativity) | grepl("Non", Nativity)) %>% #newnewnew2025
+  dplyr::group_by(Plot_Code, Event_ID, Sample_Year, Nativity) %>%
+  dplyr::summarise(Exotic_count = n()) %>%
+  ungroup()
+
+
+df_numexotics <- species_exotics %>%
+  dplyr::filter(Sample_Depth_Code != "0") %>% #newnewnew 2024
+   dplyr::mutate(Network_Scientific_Name2 = Network_Scientific_Name, 
+                Taxa2 = !!as.name(input$mp_nativegroup),
+                Network_Scientific_Name = case_when(Flag_High_Priority_Exotic == "High" ~  as.character(Network_Scientific_Name), TRUE ~ "Other")) %>%
+  dplyr::mutate(!! input$mp_nativegroup := case_when(Flag_High_Priority_Exotic == "High" ~ !!as.name(input$mp_nativegroup), TRUE ~ "Other")) %>%
+  dplyr::group_by(Plot_Code, Event_ID,
+                  Network_Scientific_Name, 
+                  !!as.name(nmap_spgroup),
+                  Sample_Year) %>%
+  dplyr::summarise(Num = n()) %>%
+  ungroup()
+
+expanded <- df_numexotics %>%
+  dplyr::select(Plot_Code, Event_ID, Sample_Year) %>%
+  dplyr::group_by(Plot_Code, Event_ID, Sample_Year) %>%
+  distinct() %>%
+  ungroup() %>%
+  dplyr::mutate(!! input$mp_nativegroup := as.factor("Other"), 
+                Network_Scientific_Name = as.factor("Other")) %>%
+  cbind(Num = 0)
+
+df_numexotics <- dplyr::full_join(df_numexotics, expanded) 
+
+df_numexotics %<>%
+   dplyr::group_by(Plot_Code, Event_ID,
+                  !!as.name(input$mp_nativegroup), !!as.name(input$mp_nativecycle)) %>%
+  dplyr::summarise(Num = sum(Num)) %>%
+  ungroup()
+
+mp_nativezoom <- df_complatlong %>%
+  dplyr::filter(Subunit_Code == input$mp_nativeunit)
+
+
+map_nativesequence <- all_events %>%
+  dplyr::filter(Subunit_Code == input$mp_nativeunit) %>%
+  dplyr::filter(!!as.name(input$mp_nativecycle) == input$mp_nativeyr) %>%
+  pull(Event_ID)
+
+rv$map_nativesequence <- map_nativesequence
+
+#filters and widens with the raw numbers 
+nonnativeprop <- species_exoticsnum %>%
+  dplyr::filter(Event_ID %in% map_nativesequence) %>%
+  dplyr::filter(!!as.name(input$mp_nativecycle) %in% input$mp_nativeyr) %>%
+  pivot_wider(names_from = Nativity, 
+              values_from = Exotic_count) %>%
+  left_join(df_complatlong) %>%
+  dplyr::filter(!is.na(Latitude)) %>%
+  dplyr::filter(!is.na(Longitude)) %>%
+  replace(is.na(.), 0) 
+
+rv$nonnativeprop <- nonnativeprop 
+
+rv$ec = leaflet::leaflet(data = mp_compboundary) %>%
+  addTiles() %>%
+  addPolygons(data = mp_compboundary, color = ~ "black") %>%
+  addMinicharts(nonnativeprop$Longitude,
+                  nonnativeprop$Latitude, # time = as.character(rv$native_comp$Year),
+                  chartdata = dplyr::select(nonnativeprop, -c(Subunit_Code, Event_ID, Plot_Num, Plot_Code, all_of(input$mp_nativecycle), Latitude, Longitude)), 
+                  type = "pie",
+                  width = 40,
+                  col = Okabe_Ito,
+                  showLabels = F
+    ) %>%
+    addLabelOnlyMarkers(df_complatlong$Longitude,
+                      df_complatlong$Latitude, 
+                      label =  df_complatlong$Plot_Num,
+                      labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T, style=list('color'="#000000", 'fontSize'="15px"))) %>%
+        addScaleBar(position = "bottomright") %>%
+    fitBounds(min(mp_nativezoom$Longitude), min(mp_nativezoom$Latitude), max(mp_nativezoom$Longitude), max(mp_nativezoom$Latitude)) 
+
+native_comp <- df_numexotics %>%
+  dplyr::filter(Event_ID %in% map_nativesequence) %>%
+  dplyr::filter(!!as.name(input$mp_nativecycle) %in% input$mp_nativeyr)
+
+native_comp <- native_comp %>%
+   pivot_wider(names_from = !!as.name(input$mp_nativegroup), 
+               values_from = Num) %>%
+  dplyr::select(sort(names(.))) %>%
+  dplyr::select(-Other, everything()) 
+
+# joining the park, subunit, plot, lat, and long  
+native_comp <- left_join(native_comp, df_complatlong, by = "Plot_Code")
+
+native_comp <- native_comp %>%
+  dplyr::filter(!is.na(Latitude)) %>%
+  dplyr::filter(!is.na(Longitude)) %>%
+  replace(is.na(.), 0) 
+
+rv$native_comp <- native_comp %>%
+  dplyr::select(-c(Latitude, Longitude)) %>%
+  dplyr::select(Subunit_Code, Event_ID, Plot_Code, all_of(input$mp_nativecycle), sort(tidyselect::peek_vars()))
+
+
+rv$nc = leaflet::leaflet(data = mp_compboundary) %>%
+  addTiles() %>%
+  addPolygons(data = mp_compboundary, color = ~ "black") %>%
+  addMinicharts(native_comp$Longitude,
+                  native_comp$Latitude, 
+                  chartdata = dplyr::select(native_comp, -c(Event_ID, Subunit_Code, Plot_Num, Plot_Code, all_of(input$mp_nativecycle), Latitude, Longitude)), 
+                  type = "pie",
+                  width = 40, 
+                  col = Okabe_Ito,
+                  showLabels = F
+    ) %>%
+    addLabelOnlyMarkers(df_complatlong$Longitude,
+                      df_complatlong$Latitude, 
+                      label =  df_complatlong$Plot_Num,
+                      labelOptions = labelOptions(noHide = T, direction = 'top', textOnly = T, style=list('color'="#000000", 'fontSize'="15px"))) %>%
+        addScaleBar(position = "bottomright") %>%
+    fitBounds(min(mp_nativezoom$Longitude), min(mp_nativezoom$Latitude), max(mp_nativezoom$Longitude), max(mp_nativezoom$Latitude)) 
+
+})
+})
+
+
+observe({
+  shiny::req(!is.null(df_speciesrich), !is.null(rv$map_nativesequence))
+  
+  rv$mp_nativerawfilter <- df_speciesrich %>%
+    dplyr::filter(Event_ID %in% rv$map_nativesequence)
+})
+
+```
+
+Native/Non-Native Species Maps {data-width=350}
+=======================================================================
+### <font style="font-size: 20px"> Native/Non-Native Species Maps </font>
+
+*<font size="3"> The map on the left contains pie charts that represent the species composition of the high priority non-native species. The map on the right contains pie charts that represent the proportion of native and non-native species. * </font>
+
+####
+```{r native map input, echo = FALSE}
+div(
+  style = "display: flex; flex-wrap: wrap;",
+  
+div(style = "margin-top: 10px; margin-right: 30px; align-self: center; ",
+actionButton("button_UpdateNativeTreeCompMap", "Update Map")
+), 
+
+div(style = "margin-top: 10px;", 
+
+renderUI({
+     shiny::req(!is.null(location))
+    
+  selectInput(
+    "mp_nativeunit",
+    label = strong("Select a Unit: "),
+    choices = sort(unique(location$Subunit_Code)),
+    selected = switch(is.null(input$mp_nativeunit)+1, input$mp_nativeunit, "")
+    )
+})
+), 
+
+div(style = "margin-top: 10px;", 
+    
+    renderUI({
+  shiny::req(!is.null(all_events)) ### new new new
+  
+  if ("Cycle" %in% names(all_events)) {
+    conditionalPanel(
+    condition = "(Cycle %in% names(all_events))",
+    selectInput("mp_nativecycle", 
+                label = strong("Select Temporal Grouping:"), 
+                choices = c("Year" = "Sample_Year", "Cycle") ))
+    
+    } else {
+      selectInput("mp_nativecycle", 
+                label = strong("Select Temporal Grouping:"), 
+                choices = c("Year" = "Sample_Year"), 
+                selected = c("Year" = "Sample_Year"))
+      }
+})
+),
+
+
+div(style = "margin-top: 10px;", 
+renderUI({
+  shiny::req(!is.null(all_events), !is.null(input$mp_nativeunit))
+  
+  if (input$mp_nativecycle == "Sample_Year") { 
+  
+    nativeyr <- all_events %>%
+    filter(Subunit_Code == input$mp_nativeunit) %>%
+    distinct(Sample_Year) %>%
+    pull(.)
+    
+selectInput(
+  "mp_nativeyr", 
+  label = strong("Select Year: "), 
+  choices = sort(nativeyr), 
+  selected = min(as.numeric(as.character(nativeyr)))
+) 
+  } else {
+    
+    nativecycle <- all_events %>%
+    filter(Subunit_Code == input$mp_nativeunit) %>%
+    distinct(Cycle) %>%
+    pull(.)
+    
+    selectInput(
+  "mp_nativeyr", 
+  label = strong("Select Cycle: "), 
+  choices = sort(unique(nativecycle)), 
+  selected = min(nativecycle)
+    )
+    
+  }
+})
+),
+
+div(style = "margin-top: 10px;", 
+
+renderUI({
+  shiny::req(!is.null(taxa))
+  
+  nmap_sp <- names(taxa)[! names(taxa) %in% c("Plant_Code", "Network_Scientific_Name")]
+  
+  selectInput(
+    "mp_nativegroup", 
+    label = strong("Select Species Grouping: "), 
+    choices = "Genus", 
+    selected = "Genus"
+  
+  )
+})
+)
+)
+
+```
+
+Row
+-----------------------------------------------------------------------
+###
+```{r native map 2}
+output$nativeleaflet <- renderLeaflet({
+  shiny::req(!is.null(rv$nc)) 
+  rv$nc
+  })
+
+leafletOutput("nativeleaflet", height = "95vh")
+```
+
+###
+```{r}
+
+output$nativeecleaflet <- renderLeaflet({
+  shiny::req(!is.null(rv$ec)) 
+  rv$ec
+  })
+
+leafletOutput("nativeecleaflet", height = "95vh")
+
+```
+
+
+Rows {.tabset .tabset-fade data-height=300}
+-----------------------------------------------------------------------
+### Data Summary of Native/Non-Native Proportion
+```{r}
+
+downloadLink("button_exportmapnativetbl", label = "Download Data Summary") 
+
+output$map_nativetable <- renderReactable({
+  shiny::req(!is.null(rv$native_comp))
+  
+  reactable::reactable(rv$native_comp, 
+                       fullWidth = TRUE,
+                       compact = TRUE,
+                       # resizeable = TRUE,
+                       defaultColDef = colDef(vAlign = "center",
+                                            headerVAlign = "bottom",
+                                            align = "left",
+                                            class = "group",
+                                            minWidth = 70,
+                                            headerClass = "header")
+
+                       )
+})
+
+reactableOutput("map_nativetable", height = "40%")
+
+output$button_exportmapnativetbl <- downloadHandler(
+    filename = function() {
+      paste0("NativeMapProportionTbl-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$native_comp, file, row.names = FALSE)
+    }
+  )
+
+
+# verticalLayout(plotlyOutput("plotly_tree"), reactableOutput("table_tree"))
+```
+
+### Data Summary of Non-Native Composition
+```{r}
+
+downloadLink("button_exportmapproptbl", label = "Download Data Summary") 
+
+output$map_nativeproptbl <- renderReactable({
+  shiny::req(!is.null(rv$nonnativeprop))
+
+  reactable::reactable(rv$nonnativeprop,
+                       fullWidth = TRUE,
+                       compact = TRUE,
+                       # filterable = TRUE,
+                       defaultColDef = colDef(
+                         vAlign = "center",
+                         headerVAlign = "bottom",
+                         align = "left",
+                         class = "group",
+                         minWidth = 70,
+                         headerClass = "header"
+                         ))
+
+})
+
+reactableOutput("map_nativeproptbl", height = "40%")
+
+output$button_exportmapproptbl <- downloadHandler(
+    filename = function() {
+      paste0("NativeSpeciesMapProportionTbl-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$nonnativeprop, file, row.names = FALSE)
+    }
+  )
+```
+
+### Filtered Raw Data
+```{r}
+
+downloadLink("button_exportmaprawtbl", label = "Download Data Summary") 
+
+output$map_nativerawtbl <- renderReactable({
+  shiny::req(!is.null(rv$mp_nativerawfilter))
+
+  reactable::reactable(rv$mp_nativerawfilter,
+                       fullWidth = TRUE,
+                       compact = TRUE,
+                       # filterable = TRUE,
+                       defaultColDef = colDef(
+                         vAlign = "center",
+                         headerVAlign = "bottom",
+                         align = "left",
+                         class = "group",
+                         minWidth = 70,
+                         headerClass = "header"
+                         ))
+
+})
+
+reactableOutput("map_nativerawtbl", height = "40%")
+
+output$button_exportmaprawtbl <- downloadHandler(
+    filename = function() {
+      paste0("NativeMapRawDataTbl-", Sys.Date(), ".csv", sep="")
+    },
+    content = function(file) {
+      write.csv(rv$mp_nativerawfilter, file, row.names = FALSE)
+    }
+  )
+
+df_speciesrich
+```
+
+

@@ -122,7 +122,7 @@ temp_rv <- shiny::reactiveValues(
 ```{r}
 
 # Define the folder path where the files are located
-folder_path <- here::here("output")  # Modify this as needed
+folder_path <- here::here("outputCUPN2024")  # Modify this as needed
 
 # General function to load data files based on a keyword
 load_data_by_keyword <- function(folder_path, keyword) {
@@ -147,14 +147,14 @@ trees <- load_data_by_keyword(folder_path, "tree")
 location <- load_data_by_keyword(folder_path, "location")
 broadgroup <- load_data_by_keyword(folder_path, "broadgroup")
 speciesrich <- load_data_by_keyword(folder_path, "speciesdiversity")
-genus <- load_data_by_keyword(folder_path, "genus_grouping")
+# genus <- load_data_by_keyword(folder_path, "genus_grouping")
 canopycover <- load_data_by_keyword(folder_path, "canopycover")
 taxa <- load_data_by_keyword(folder_path, "taxa")
 events <- load_data_by_keyword(folder_path, "event")
 seedlingsapling <- load_data_by_keyword(folder_path, "seedlingsapling")
-speciescover <- load_data_by_keyword(folder_path, "speciescover")
+# speciescover <- load_data_by_keyword(folder_path, "speciescover")
 coverclass <- load_data_by_keyword(folder_path, "coverclass")
-genus_group <- load_data_by_keyword(folder_path, "grouping")
+genus_group <- load_data_by_keyword(folder_path, "genus_grouping")
 ```
 
 ```{r message = FALSE, results = FALSE, echo = FALSE}
@@ -295,9 +295,10 @@ species_exotics <- df_speciesrich %>%
 ```
 
 
-```{r Nativity Map Observe Event}
+```{r Nativity Map Observe Event} 
+##########################   THIS CODE IS NOT COMPATIBLE WITH CYCLE CHANGGGEEEEE
 observeEvent(eventExpr = input$button_UpdateNativeTreeCompMap, {
-  shiny::req(!is.null(input$mp_nativeunit), !is.null(input$mp_nativeyr), !is.null(mp_compboundary), !is.null(location), !is.null(df_speciesrich), !is.null(speciescover), !is.null(taxa), !is.null(input$mp_nativegroup), !is.null(species_exotics), !is.null(input$mp_nativecycle), !is.null(all_events))
+  shiny::req(!is.null(input$mp_nativeunit), !is.null(input$mp_nativeyr), !is.null(mp_compboundary), !is.null(location), !is.null(df_speciesrich), !is.null(taxa), !is.null(input$mp_nativegroup), !is.null(species_exotics), !is.null(input$mp_nativecycle), !is.null(all_events))
   
 # input values
 # input <- list()
@@ -310,9 +311,9 @@ observeEvent(eventExpr = input$button_UpdateNativeTreeCompMap, {
   
 nmap_spgroup <- input$mp_nativegroup
 
-constancy_native <- speciescover %>%
-  dplyr::left_join(select(taxa, Plant_Code, Genus)) %>%
-    dplyr::select(Plot_Code, Start_Date, Plant_Code, !!as.name(nmap_spgroup), Cover_Class, !!as.name(input$mp_nativecycle)) 
+# constancy_native <- speciescover %>%
+#   dplyr::left_join(select(taxa, Plant_Code, Genus)) %>%
+#     dplyr::select(Plot_Code, Start_Date, Plant_Code, !!as.name(nmap_spgroup), Cover_Class, !!as.name(input$mp_nativecycle)) 
 
 
 df_complatlong <- location %>% 
@@ -897,7 +898,7 @@ observe({
   shiny::req(!is.null(trees), !is.null(rv$df_wdevents))
 
     datatreetbl <- trees %>%
-      dplyr::select(Plot_Code, Start_Date, Event_ID, Module, Tree_Number, Plant_Code, DBH) %>%
+      dplyr::select(Plot_Code, Start_Date, Event_ID, Module, Tree_Number, Plant_Code, DBH, Status_Name) %>%
       dplyr::mutate(Event_ID = as.character(Event_ID)) %>%
       dplyr::filter(Event_ID %in% rv$df_wdevents)
 
@@ -1094,9 +1095,12 @@ df_treedivmap %<>%
 park_zoom <- location %>%
   dplyr::filter(Subunit_Code == input$map_subunit)
 
-bc = leaflet::leaflet(data = mp_compboundary) %>%
+map_season <- if (input$map_season == "Sample_Year") "Year" else input$map_season
+
+bc = leaflet::leaflet(data = mp_compboundary) %>% #### new new title
   addTiles() %>%
-  addPolygons(data = mp_compboundary, color = ~ "black")
+  addPolygons(data = mp_compboundary, color = ~ "black") %>%
+  addControl(html = paste0(input$map_subunit, " ", map_season, " ", input$map_year, ": ", input$size_class), position = "topleft")
 
 okabe_ito <- c("#0072B2", "#D55E00", "#009E73", '#99DDFF', 
                 '#332288', '#882255', '#FFAABB', "#F0E442")
@@ -1132,7 +1136,7 @@ bc <- bc %>%
     width = 45,
     col = color_palette, 
     showLabels = F,
-    ) %>%
+    ) %>% 
   addLabelOnlyMarkers(df_maplocation$Longitude,
                       df_maplocation$Latitude,
                       label =  df_maplocation$PlotNum,
@@ -1141,9 +1145,7 @@ bc <- bc %>%
   fitBounds(min(park_zoom$Longitude), min(park_zoom$Latitude), max(park_zoom$Longitude), max(park_zoom$Latitude)) %>%
     addLayersControl(
       overlayGroups = c("Markers"), 
-      options = layersControlOptions(collapsed = FALSE)
-
-    )
+      options = layersControlOptions(collapsed = FALSE)) 
 
 cat("Line4")
 
@@ -1203,11 +1205,14 @@ rv$df_spdivbar <- chartdata_long %>%
   geom_bar(width = 0.45, 
            position = "fill",
            stat = "identity") +
-  theme_clean() +
-  labs(title = paste0(click_marker(), ", ",input$map_year), x = "", y = "") +
+  theme_clean() + #input$size_class
+  labs(title = paste0(click_marker(), ", ", input$map_season, ": " ,input$map_year), x = "", y = "") +
   scale_x_discrete(limits = positions) +
-    scale_fill_manual(values = nn[colors],
+    # scale_fill_discrete(name = "Genus") + 
+  scale_fill_manual(name = "Genus", 
+                    values = nn[colors],
                       drop = TRUE) 
+  
 
 cat("line153")
 })
@@ -1236,7 +1241,7 @@ observe({
   
   if (input$size_class == "Tree") {
     data <- trees %>%
-    dplyr::select(Plot_Code, Start_Date, Event_ID, Module, Tree_Number, Plant_Code, DBH)
+    dplyr::select(Plot_Code, Start_Date, Event_ID, Module, Tree_Number, Status_Name, Plant_Code, DBH)
   } else {
     data <- seedlingsapling
   }
@@ -1558,11 +1563,11 @@ renderUI({
 div(style = "margin-top: 10px;", 
     
     renderUI({
-  shiny::req(!is.null(speciescover))
+  shiny::req(!is.null(all_events)) ### new new new
   
-  if ("Cycle" %in% names(speciescover)) {
+  if ("Cycle" %in% names(all_events)) {
     conditionalPanel(
-    condition = "(Cycle %in% names(tree_basics))",
+    condition = "(Cycle %in% names(all_events))",
     selectInput("mp_nativecycle", 
                 label = strong("Select Temporal Grouping:"), 
                 choices = c("Year" = "Sample_Year", "Cycle") ))
@@ -1579,7 +1584,7 @@ div(style = "margin-top: 10px;",
 
 div(style = "margin-top: 10px;", 
 renderUI({
-  shiny::req(!is.null(all_events), !is.null(input$mp_nativeunit), !is.null(speciescover))
+  shiny::req(!is.null(all_events), !is.null(input$mp_nativeunit))
   
   if (input$mp_nativecycle == "Sample_Year") { 
   
@@ -2087,9 +2092,10 @@ Woody Plant Characteristics
 
 div(
   style = "display: flex; flex-wrap: wrap;",
-div(style = "margin-top: 10px; align-self: center; ", # margin-right: 30px; 
-    actionButton("button_UpdateTable", "Update Table") 
-), 
+  
+  div(style = "margin-top: 10px; margin-right: 30px; align-self: center; ",
+    actionButton("button_UpdateTable", "Update Table")
+   ), 
 
 div(style = "margin-top: 10px;",
     renderUI({  

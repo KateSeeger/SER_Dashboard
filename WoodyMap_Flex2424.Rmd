@@ -86,15 +86,15 @@ temp_rv <- shiny::reactiveValues(
 ```{r message = FALSE, results = FALSE, echo = FALSE}
 #reading in csvs
 
-trees <- read_csv(here::here("output", "CUPN_TreeBasics.csv")) #NEWNEW cycle tree basics
-seedlingsapling <- read_csv(here::here("output", "CUPN_SeedlingSapling.csv")) #NEWNEW cycle seedling sapling
-broadgroup <- read_csv(here::here("output", "CUPN_BroadGroup.csv")) #used to be broadgroup
+trees <- read_csv(here::here("outputCUPN2024", "CUPN_TreeBasics.csv")) #NEWNEW cycle tree basics
+seedlingsapling <- read_csv(here::here("outputCUPN2024", "CUPN_SeedlingSapling.csv")) #NEWNEW cycle seedling sapling
+broadgroup <- read_csv(here::here("outputCUPN2024", "CUPN_BroadGroup.csv")) #used to be broadgroup
 # species_rich <- read_csv(here::here("Data_In","SpeciesDiversity_LongFormat_20230421.csv")) #waiting on new data from Tim
-taxa <- read_csv(here::here("output", "TaxaTable.csv"))
-location <- read_csv(here::here("output", "Location_Table2.csv")) #let's just call this LOCATION
-canopycover <- read_csv(here::here("output", "CUPN_CanopyCover.csv"))
-genus_group <- read_csv(here::here("output", "Genus_grouping.csv"))
-events <- read_csv(here::here("output", "CUPN_EventTable2.csv"))
+taxa <- read_csv(here::here("outputCUPN2024", "TaxaTable.csv"))
+location <- read_csv(here::here("outputCUPN2024", "Location_Table2.csv")) #let's just call this LOCATION
+canopycover <- read_csv(here::here("outputCUPN2024", "CUPN_CanopyCover.csv"))
+genus_group <- read_csv(here::here("outputCUPN2024", "Genus_grouping.csv"))
+events <- read_csv(here::here("outputCUPN2024", "CUPN_EventTable2.csv"))
 shapefile <- st_read(here::here('./cupn_shapefile/CUPN.shp'))
 mp_compboundary <- st_transform(shapefile, crs = 4326)
 
@@ -331,7 +331,7 @@ woodymptop_species <- as.character(c(as.character(woodymptop_species), "Other", 
   }
 
 spdiv <- df_spdiv %>%
-  left_join(df_genus, by = "Plant_Code") %>%
+  left_join(df_genus, by = "Plant_Code", relationship = "many-to-many") %>%
   dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4),
                 Plant_Code = as.factor(Plant_Code)) %>%
   dplyr::mutate(Plot_Genus = forcats::fct_other(.[[input$map_spgroup]], #works for genus genus and genus group
@@ -373,7 +373,6 @@ spdiv %<>%
   
 # rv$spcomp <- spcomp # save spdiv is the equivalent into a reactive format
 # rv$spdiv <- spdiv
-
 df_mapwide <- spdiv %>%
   tidyr::pivot_wider(
     names_from = input$map_usergroup, #input$map_usergroup, #Plot_Genus,
@@ -412,9 +411,12 @@ df_treedivmap %<>%
 park_zoom <- location %>%
   dplyr::filter(Subunit_Code == input$map_subunit)
 
+map_season <- if (input$map_season == "Sample_Year") "Year" else input$map_season
+
 bc = leaflet::leaflet(data = mp_compboundary) %>%
   addTiles() %>%
-  addPolygons(data = mp_compboundary, color = ~ "black")
+  addPolygons(data = mp_compboundary, color = ~ "black") %>%
+  addControl(html = paste0(input$map_subunit, " ", map_season, " ", input$map_year, ": ", input$size_class), position = "topleft")
 
 okabe_ito <- c("#0072B2", "#D55E00", "#009E73", '#99DDFF', 
                 '#332288', '#882255', '#FFAABB', "#F0E442")
@@ -842,6 +844,7 @@ leafletOutput("leaflet", height = "95vh")
 ###
 
 ```{r}
+downloadLink("button_exportwdmapstack", label = "Download PNG") 
 
 output$map_tree <- renderPlot({
   shiny::req(!is.null(rv$df_spdivbar))
@@ -849,6 +852,15 @@ output$map_tree <- renderPlot({
   rv$df_spdivbar})
 
 plotOutput("map_tree")
+
+output$button_exportwdmapstack <- downloadHandler(
+  filename = function() {
+      paste0("stackedbarplot", Sys.Date(), ".png", sep="")
+    },
+  content = function(file) {
+  ggsave(file, plot=rv$df_spdivbar, device = "png")
+})  
+
 ```
 
 

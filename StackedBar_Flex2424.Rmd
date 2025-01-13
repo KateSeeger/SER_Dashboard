@@ -94,16 +94,28 @@ temp_rv <- shiny::reactiveValues(
 ```
 
 ```{r}
+# trees <- read_csv(here::here("output", "trees.csv")) #NEWNEW cycle tree basics
+# seedlingsapling <- read_csv(here::here("output", "SeedlingSapling.csv")) #NEWNEW cycle seedling sapling
+# broadgroup <- read_csv(here::here("output", "Broadgroup.csv")) #used to be broadgroup
+# # species_rich <- read_csv(here::here("Data_In","SpeciesDiversity_LongFormat_20230421.csv")) #waiting on new data from Tim
+# taxa <- read_csv(here::here("output", "Taxa.csv"))
+# location <- read_csv(here::here("output", "Location.csv")) #let's just call this LOCATION
+# # genus_group <- read_csv(here::here("output", "Genus_grouping.csv"))
+# events <- read_csv(here::here("output", "Events.csv"))
+
+```
+
+```{r}
 #reading in csvs
 
-trees <- read_csv(here::here("output", "CUPN_TreeBasics.csv")) #NEWNEW cycle tree basics
-seedlingsapling <- read_csv(here::here("output", "CUPN_SeedlingSapling.csv")) #NEWNEW cycle seedling sapling
-broadgroup <- read_csv(here::here("output", "CUPN_BroadGroup.csv")) #used to be broadgroup
+trees <- read_csv(here::here("outputCUPN2024", "CUPN_TreeBasics.csv")) #NEWNEW cycle tree basics
+seedlingsapling <- read_csv(here::here("outputCUPN2024", "CUPN_SeedlingSapling.csv")) #NEWNEW cycle seedling sapling
+broadgroup <- read_csv(here::here("outputCUPN2024", "CUPN_BroadGroup.csv")) #used to be broadgroup
 # species_rich <- read_csv(here::here("Data_In","SpeciesDiversity_LongFormat_20230421.csv")) #waiting on new data from Tim
-taxa <- read_csv(here::here("output", "TaxaTable.csv"))
-location <- read_csv(here::here("output", "Location_Table2.csv")) #let's just call this LOCATION
-genus_group <- read_csv(here::here("output", "Genus_grouping.csv"))
-events <- read_csv(here::here("output", "CUPN_EventTable2.csv"))
+taxa <- read_csv(here::here("outputCUPN2024", "TaxaTable.csv"))
+location <- read_csv(here::here("outputCUPN2024", "Location_Table2.csv")) #let's just call this LOCATION
+genus_group <- read_csv(here::here("outputCUPN2024", "Genus_grouping.csv"))
+events <- read_csv(here::here("outputCUPN2024", "CUPN_EventTable2.csv"))
 
 ```
 
@@ -167,12 +179,33 @@ remove_habcolumns <- c("Fit", "Confidence", "Sample_Year", "Event_ID", "Start_Da
 ```
 
 ```{r}
+# func_processdata <- function(df, growth_form) {
+#   df %>%
+#     dplyr::mutate(Start_Date = as.Date(lubridate::mdy_hm(Start_Date)),
+#                   Sample_Year = as.factor(Sample_Year),
+#                   Growth_Form = growth_form)
+# }
+#newnewnew
 func_processdata <- function(df, growth_form) {
+  # Check if the data matches the mdy_hm format (month-day-year hour:minute)
+  if (all(!is.na(lubridate::mdy_hm(df$Start_Date, quiet = TRUE)))) {
+    df <- df %>%
+      dplyr::mutate(Start_Date = as.Date(lubridate::mdy_hm(Start_Date)))
+  } else if (all(!is.na(lubridate::mdy(df$Start_Date, quiet = TRUE)))) {
+    df <- df %>%
+      dplyr::mutate(Start_Date = as.Date(lubridate::mdy(Start_Date)))
+  } else {
+    stop("Unable to parse Start_Date. Ensure the format is either 'mdy' or 'mdy_hm' and consistent.")
+  }
+
+  # Apply the rest of the transformations
   df %>%
-    dplyr::mutate(Start_Date = as.Date(lubridate::mdy_hm(Start_Date)),
-                  Sample_Year = as.factor(Sample_Year),
-                  Growth_Form = growth_form)
+    dplyr::mutate(
+      Sample_Year = as.factor(Sample_Year),
+      Growth_Form = growth_form
+    )
 }
+
 
 df_genus <- taxa %>% 
   dplyr::select(Plant_Code, Genus) 
@@ -182,9 +215,14 @@ df_events <- func_processdata(events, NA)
 # df_events %<>%
 #   dplyr::mutate(Subunit_Code = substr(Plot_Code, 1, 4))
 
+#newnewnew
 df_trees <- func_processdata(trees, "Tree") %>%
-  dplyr::filter(Status_Name == "Live Tree") %>%
-  dplyr::mutate(BA_ha = ((pi * DBH^2) / 40000) / 0.04)          # df_trees and df_seedsap are slaying
+  dplyr::filter(str_detect(tolower(Status_Name), "live")) %>%  # Case-insensitive match for "live"
+  dplyr::mutate(BA_ha = ((pi * DBH^2) / 40000) / 0.04)
+
+# df_trees <- func_processdata(trees, "Tree") %>%
+#   dplyr::filter(Status_Name == "Live Tree") %>%
+#   dplyr::mutate(BA_ha = ((pi * DBH^2) / 40000) / 0.04)          # df_trees and df_seedsap are slaying
 
 df_seedsap <- func_processdata(seedlingsapling, NA)
 
@@ -239,19 +277,33 @@ df_sap <- df_seedsap %>%
 ```
 
 ```{r}
+# newnewnew
 all_events <- df_events %>%
   left_join(broadgroup) %>%
-  dplyr::filter(Event_Type != "QA/QC")%>% 
+  {
+    # Check if Event_Type exists in the dataframe
+    if ("Event_Type" %in% names(.)) {
+      dplyr::filter(., Event_Type != "QA/QC")
+    } else {
+      .
+    }
+  } %>%
   left_join(location %>% dplyr::select(Network_Code, Park_Code, Subunit_Code, Plot_Code), by = "Plot_Code")
+
+
+# all_events <- df_events %>%
+#   left_join(broadgroup) %>%
+#   dplyr::filter(Event_Type != "QA/QC") %>% 
+#   left_join(location %>% dplyr::select(Network_Code, Park_Code, Subunit_Code, Plot_Code), by = "Plot_Code")
 
 ```
 
 ```{r}
 # input <- list()
 # input$stack_spatialunit <- "Subunit_Code"
-# input$stack_userunit <- "BIRT"
+# input$stack_userunit <- "Beech Creek"
 # input$stack_season <- "Sample_Year"
-# input$stack_year <- "2011"
+# input$stack_year <- "2022"
 # input$stack_spatialhabitat <- "All"
 # input$stack_userhabitat <- "All" #Appalachian & Interior Mesophytic Forest"
 # input$stack_spgroup <- "Genus" # options are Genus and plant code
@@ -260,7 +312,7 @@ observeEvent(eventExpr = input$button_UpdatePlots, {
   
   cat("Line0")
 
- shiny::req(!is.null(input$stack_spatialunit), !is.null(input$stack_userunit), !is.null(input$stack_spatialhabitat), !is.null(df_treefull), !is.null(all_events), !is.null(input$stack_year), !is.null(input$stack_spgroup), !is.null(input$stack_season), !is.null(input$stack_userhabitat))
+ shiny::req(!is.null(input$stack_spatialunit), !is.null(input$stack_userunit), !is.null(input$stack_spatialhabitat), !is.null(df_treefull), !is.null(all_events), !is.null(input$stack_year), !is.null(input$stack_spgroup), !is.null(input$stack_season), !is.null(input$stack_userhabitat), !is.null(input$imgtitle))
 
 #this code is selecting for the spatial scale, for plotting bar chats we can either look at everything across the entire plot, ORRRR  we can look within a park/subunit and select for the smaller grouping
  if (input$stack_spatialhabitat == "All" & input$stack_userhabitat == "All") {
@@ -273,14 +325,18 @@ observeEvent(eventExpr = input$button_UpdatePlots, {
      dplyr::filter(!!as.name(input$stack_spatialunit) == input$stack_userunit) %>%
      dplyr::filter(!!as.name(input$stack_spatialhabitat) == input$stack_userhabitat) %>%
      distinct(!!as.name(input$stack_season), Plot_Code, Event_ID)
+   
    } 
+ 
+
 
 stack_sequence <- nplot %>%
   # dplyr::filter(Sample_Year == "2011") %>%
   # dplyr::mutate(Event_ID = as.character(Event_ID)) %>%
   dplyr::filter(!!as.name(input$stack_season) == input$stack_year) %>%
   pull(Event_ID)
-
+ 
+   
 # rv$stack_sequence <- c("{E63CDE8F-BAD7-459B-AC64-41E7C490A8CF}", "{56E30A9C-7C8A-4ADC-8A4F-878AEB25B152}", "{015E0434-5E1F-43D8-BFC4-A6AC08A3C0CA}", "{3134AC0D-E52C-4350-94AB-9EA129F5BB01}")
 
 rv$stack_sequence <- as.character(stack_sequence)
@@ -395,6 +451,12 @@ levels(df_sptreefull[[input$stack_usergroup]])
 
 page_height = 650
 
+t <- list(
+  family = "Times New Roman",
+  size = 16,
+  bold = TRUE,
+  color = "black")
+
   # species_group_og <- input$stack_usergroup
 
     plot_tree <- df_sptreefull %>%
@@ -406,11 +468,6 @@ page_height = 650
                 stat = "identity") + 
        theme_clean() + 
        labs(x = "", y = "") + 
-       ggtitle("") + 
-       theme(plot.title = element_text(lineheight = 3, 
-                                       face = "bold", 
-                                       color = "black", 
-                                       size = 12)) + 
       scale_fill_manual(values = nn[colors]) +
        scale_x_discrete(limits = positions) 
        
@@ -418,31 +475,19 @@ page_height = 650
  # if (x == 1 ) {
        ggplotly(plot_tree, width = 475) %>% #, height = page_height
   layout(
+    title = list(text = input$imgtitle, font = t, y = 0.9, x = 0.4, xanchor = 'center', yanchor =  'bottom'),
   margin = list(
   l = 50,#50, 
   r = 50,#50,
-  b = 100,#100,
-  t = 0,#100,
+  b = 50,#100,
+  t = 50,#100,
   pad = 0 ), #40)   ,
-  legend = list(orientation = 'h',
-                xanchor = "center",
+  legend = list(
+      title = "",
+      orientation = 'v',
+                yanchor = "center",
                 borderwidth = 0.5,
-                x = 0.5,
-                y = -0.092,
-                title = "",
-                # title = list(font = list(size = 12)),
-                font = list(size = 11),   
-  annotations = list(text = paste0("Relative Proportion of Woody Stem Size Classes within <br>", input$stack_userhabitat, " of ",input$stack_userunit), 
-                     font = list(size = 13), 
-                     showarrow = FALSE,
-                     xref = 'paper', x = 0.75,
-                     yref = 'paper', y = 1.1), 
-  annotations = list(text = paste0("Number of Surveyed Plots:", sum(count(nplot)$freq), "<br>Total densities of genera in all plots of the selected spatial and habitat groups <br> (seedlings and saplings summed at 1 and 10 m2 quadrats; <br> trees summed at the 400m2 plot level)"), #added comma
-                     font = list(size = 12), 
-                     showarrow = FALSE,
-                            xref = 'paper', x = 0.5,
-                            yref = 'paper', y = -0.30)   ##### THIS ANNOTATION IS NOT SHOWING UP AT ALLLLLLL
-  ) )
+                y = 0.5 ) )
    
 })
 
@@ -492,20 +537,26 @@ renderUI({
 selectInput(
   "stack_spatialunit",
   label = strong("Select Spatial Scale: "),
-  choices = c("Network_Code", "Park_Code", "Subunit_Code") 
+  choices = c("Network_Code", "Park_Code", "Subunit_Code"), 
+  selected = "Network_Code"
 )
 })
 )
  
 
-
 renderUI({ #needed bc reactive
   shiny::req(!is.null(input$stack_spatialunit), !is.null(all_events))
+  # input<- list() 
+  # input$stack_spatialunit <- "Subunit_Code"
+  spatialuserchoice <- all_events %>%
+    distinct(!!as.name(input$stack_spatialunit))
   
   selectInput(
     "stack_userunit",
     label = strong(paste0("Select Individual Unit of ", input$stack_spatialunit, ":" )),
-    choices = unique(all_events[input$stack_spatialunit]) %>% pull(.) %>% sort()
+    choices = sort(spatialuserchoice[[input$stack_spatialunit]]), 
+    selected = sort(spatialuserchoice[[input$stack_spatialunit]])[1]
+    
   )
 
 })
@@ -520,7 +571,8 @@ renderUI({
     condition = "(Cycle %in% names(all_events))",
     selectInput("stack_season", 
                 label = strong("Select Temporal Grouping:"), 
-                choices = c("Sample_Year", "Cycle") ))
+                choices = c("Sample_Year", "Cycle"), 
+                selected = "Sample_Year"))
     
     } else {
       selectInput("stack_season", 
@@ -557,7 +609,8 @@ renderUI({
   selectInput(
   "stack_spatialhabitat", 
   label = strong("Select Habitat Group: "),
-  choices = c("All", sort(habgroup))
+  choices = c("All", sort(habgroup)), 
+  selected = "All"
   )
 
 })
@@ -569,7 +622,8 @@ renderUI({
      selectInput(
     "stack_userhabitat",
     label = strong("Select Habitat Grouping: "),
-    choices = c("All")
+    choices = c("All"), 
+    selected = "All"
     
   )  } else {
 
@@ -582,7 +636,8 @@ renderUI({
   selectInput(
     "stack_userhabitat",
     label = strong("Select Habitat Grouping: "),
-    choices = c(sort(communitychoice))
+    choices = c(sort(communitychoice)),
+    selected = sort(communitychoice)[1]
   )
   }
 
@@ -637,6 +692,25 @@ div(style = "margin-bottom: 30px;",
     
   )
 
+### newnewnew
+renderUI({
+  shiny::req(!is.null(input$stack_spatialhabitat), !is.null(input$stack_userhabitat), !is.null(input$stack_userunit), !is.null(input$stack_season), !is.null(input$stack_year))
+  
+   if (input$stack_spatialhabitat == "All" & input$stack_userhabitat == "All") {
+  plottitle <- input$stack_userunit
+   
+   } else {
+  plottitle <- paste(input$stack_userunit, input$stack_userhabitat)
+   
+   } 
+ 
+textInput(
+  "imgtitle", 
+  label = strong("Plot Title"),
+  value = paste(plottitle, input$stack_season, input$stack_year)
+  
+)
+})
 ```
 
 
@@ -644,11 +718,20 @@ Rows {data-height = 925}
 -----------------------------------------------------------------------
 ###
 ```{r}
+# output$stackplotly_tree <- renderPlotly({
+#   shiny::req(!is.null(rv$plotly_tree))
+#   rv$plotly_tree})
+# 
+# plotlyOutput("stackplotly_tree", height = "70%") #, width = "50%") # width used to be 50 I don't think this changed anything
+
+downloadLink("button_exportstackbar", label = "Download .png") 
+
 output$stackplotly_tree <- renderPlotly({
   shiny::req(!is.null(rv$plotly_tree))
   rv$plotly_tree})
 
-plotlyOutput("stackplotly_tree", height = "70%") #, width = "50%") # width used to be 50 I don't think this changed anything
+plotlyOutput("stackplotly_tree", height = "70%")
+     
 ```
 
 
